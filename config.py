@@ -46,7 +46,14 @@ def get_ffmpeg_path():
     if os.path.exists(local_bin): return local_bin
 
     if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, 'ffmpeg.exe')
+        # Verifica sia nella root del bundle che nella sottocartella ffempeg/
+        bundled_root = sys._MEIPASS
+        paths_to_check = [
+            os.path.join(bundled_root, 'ffmpeg.exe'),
+            os.path.join(bundled_root, 'ffempeg', 'ffmpeg.exe')
+        ]
+        for p in paths_to_check:
+            if os.path.exists(p): return p
     
     # Fallback to standard name if not found in custom paths
     return 'ffmpeg'

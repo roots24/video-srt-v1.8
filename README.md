@@ -18,11 +18,36 @@ Questo repository contiene un'applicazione Python per il download di video e la 
 - Python 3.8+
 - ffmpeg (incluso nella cartella `ffempeg/`)
 
-## Setup
+## Setup e Installazione
 
-1. Clona il repository
-2. Installa le dipendenze richieste (se presenti)
-3. Avvia `main.py`
+### Per Sviluppatori
+
+1. Clona il repository.
+2. Installa le dipendenze:
+
+   ```bash
+   pip install customtkinter edge-tts pydub deep-translator yt-dlp
+   ```
+
+3. Avvia l'applicazione: `python main.py`.
+
+### Compilazione in Eseguibile (.exe)
+
+Se desideri compilare l'applicazione in un singolo file eseguibile per Windows, segui questi passaggi:
+
+1. **Installa PyInstaller**:
+
+   ```bash
+   pip install pyinstaller
+   ```
+
+2. **Lancia la compilazione** utilizzando il file di configurazione `.spec` fornito (che include automaticamente i binari FFmpeg e le dipendenze):
+
+   ```bash
+   pyinstaller build_app.spec
+   ```
+
+3. Troverai l'eseguibile finale nella cartella `dist/UltimateVideoTranslatorAI.exe`.
 
 ## Note
 

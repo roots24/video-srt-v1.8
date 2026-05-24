@@ -47,20 +47,28 @@ Il modulo integrato per il download dei contenuti si basa su `yt-dlp` e offre:
 
 ---
 
-## 🛠️ Gestione FFmpeg & Dipendenze
+## 🛠️ Gestione FFmpeg & Packaging
 
 ### Risoluzione Binari (Priority Path)
 
-L'applicazione risolve il percorso di FFmpeg seguendo una gerarchia di priorità:
+L'applicazione risolve il percorso di FFmpeg seguendo una gerarchia di priorità, fondamentale sia in modalità script che in modalità bundle:
 
-1. Percorso utente salvato in `ffmpeg_settings.txt`.
-2. Cartella `/bin/` locale nel progetto.
-3. Directory temporanea `_MEIPASS` (per versioni compilate in `.exe`).
-4. Comando globale nel PATH di sistema.
+1. **Configurazione Utente**: Percorso salvato in `ffmpeg_settings.txt`.
+2. **Ambiente Sviluppo**: Cartella `/bin/` locale nel progetto.
+3. **Bundle PyInstaller**: Directory temporanea `_MEIPASS`. Il sistema verifica sia la root del bundle che la sottocartella `ffempeg/` per garantire il funzionamento dell'eseguibile standalone.
+4. **Sistema**: Comando globale nel PATH di sistema.
 
 ### Auto-Update Engine
 
 Il sistema verifica autonomamente la versione di FFmpeg. Se assente o obsoleta, scarica automaticamente l'ultima build *win64-gpl-shared* da GitHub, estrae i binari e le DLL necessarie e configura il sistema per l'utilizzo immediato.
+
+### Packaging & Distribuzione (EXE)
+
+L'applicazione è configurata per essere compilata in un singolo file `.exe` tramite **PyInstaller**.
+
+- **Configurazione Spec**: Viene utilizzato un file `build_app.spec` che istruisce PyInstaller a includere l'intera cartella `ffempeg/` all'interno del bundle.
+- **Dependency Mapping**: I moduli critici come `edge-tts`, `yt-dlp` e `customtkinter` sono mappati come `hiddenimports` per evitare errori di runtime nel bundle compilato.
+- **UX Standalone**: L'opzione `--noconsole` è attiva per nascondere il terminale all'avvio, fornendo un'esperienza utente puramente basata su interfaccia grafica.
 
 ---
 
