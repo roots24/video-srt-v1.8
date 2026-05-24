@@ -1,17 +1,23 @@
 """
 Punto di ingresso principale dell'applicazione Ultimate Video Translator AI PRO v1.8.
-Questo file si occupa di inizializzare l'interfaccia grafica e avviare il loop principale di Tkinter.
+
+ARCHITETTURA TECNICA:
+L'applicazione segue un pattern a separazione tra Interfaccia Utente (GUI) e Logica di Business (Backend).
+- GUI: Gestita in `gui.py` utilizzando CustomTkinter per l'interfaccia moderna.
+- Backend: Gestito in `logic.py`, `downloader_logic.py` e `config.py`.
+- Entry Point: Questo file inizializza l'oggetto App e avvia il loop di eventi di Tkinter.
 """
 
 from gui import App
 
 if __name__ == "__main__":
-    # Creazione dell'istanza della classe App definita in gui.py
-    # L'oggetto 'app' eredita da ctk.CTk (CustomTkinter) e contiene 
-    # l'intera struttura della GUI e il collegamento alla logica di business.
+    # Istanziazione della classe App (definita in gui.py).
+    # L'oggetto 'app' eredita da ctk.CTk, inizializzando tutti i widget 
+    # e collegando le callback della GUI ai metodi della classe VideoTranslatorLogic.
     app = App()
 
-    # Avvio del loop principale dell'interfaccia grafica.
-    # Questo metodo mantiene aperta la finestra e gestisce gli eventi (click, input, etc.)
-    # finché l'utente non chiude l'applicazione.
+    # Avvio del Main Loop di Tkinter.
+    # Questo metodo blocca l'esecuzione in questo punto e avvia il listener degli eventi.
+    # Qualsiasi operazione pesante (TTS, Traduzione, Mixaggio) deve essere eseguita 
+    # in Thread separati per evitare il freeze della UI (Application Not Responding).
     app.mainloop()

@@ -1,73 +1,82 @@
-# Ultimate Video Translator AI PRO v1.8 (EdgeTTS Edition)
+# Ultimate Video Translator AI PRO v1.8 (EdgeTTS Edition) - Documentazione Tecnica
 
-Benvenuti nella versione 1.8 di **Ultimate Video Translator AI**, un applicativo professionale per la traduzione e il doppiaggio automatico di video basato su file SRT. Questa versione introduce un salto qualitativo significativo grazie all'integrazione di voci neurali e una struttura software modulare.
+Benvenuti nella versione 1.8 di **Ultimate Video Translator AI**, un applicativo professionale per la traduzione e il doppiaggio automatico di video basato su file SRT. Questa release rappresenta l'evoluzione massima del progetto, integrando sintesi vocale neurale, gestione resiliente delle API e un motore di download avanzato.
 
-## 🌟 Novità della Versione 1.8
+## 🏗️ Architettura Software
 
-### 🎙️ Voci Neurali con Edge-TTS
+L'applicazione adotta un pattern a **separazione tra Interfaccia Utente (GUI) e Logica di Business (Backend)**:
 
-La principale novità è la sostituzione di `gTTS` con **Edge-TTS**. Questo permette di ottenere:
-
-- **Qualità Vocale Superiore**: Voci naturali, meno robotiche e più espressive.
-- **Voci Neurali**: Utilizzo di modelli neurali di Microsoft Edge per una sintesi vocale di alta qualità gratuitamente.
-- **Mappatura Lingue**: Supporto ottimizzato per diverse lingue (English, Italian, Spanish, French, German, Chinese, Ukrainian) con voci specifiche assegnate.
-
-### 🚀 Ottimizzazioni Tecniche & Architettura
-
-- **Struttura Modulare**: Il codice è stato rifattorizzato in più moduli (`config`, `logic`, `gui`, `main`) per garantire una migliore manutenibilità e scalabilità.
-- **Gestione Asincrona**: Implementazione di `asyncio` all'interno dei thread worker per gestire le chiamate API a Edge-TTS in modo efficiente.
-- **Concurrency Refactoring**: Ottimizzazione del `ThreadPoolExecutor` per bilanciare velocità di elaborazione e stabilità della connessione, evitando blocchi o ban dalle API.
-- **Sincronizzazione Temporale Avanzata**:
-  - **Time-Stretching Dinamico**: Adattamento automatico della velocità dell'audio tramite FFmpeg `atempo`.
-  - **Controllo Limite Velocità**: Possibilità di impostare un limite massimo di accelerazione (da 1.0x a 3.0x) per preservare la naturalezza della voce.
-  - **Sincronizzazione Forzata**: Modalità opzionale che ignora i limiti di velocità per garantire che l'audio entri esattamente nei tempi del video, indipendentemente dalla distorsione.
-
-### 🎨 UI/UX Enhancements
-
-- **Feedback in Tempo Reale**: Barra di progressione (`CTkProgressBar`) sincronizzata con l'avanzamento reale dei segmenti elaborati.
-- **Controllo Mixaggio Audio**: Aggiunti cursori per la regolazione dinamica del volume sia dell'audio originale che della nuova traccia tradotta.
-- **Interfaccia Moderna**: Utilizzo di `customtkinter` per un look professionale e dark mode nativa.
-
-## 🛠️ Requisiti di Sistema
-
-Per far funzionare l'applicativo, è necessario installare le seguenti dipendenze:
-
-### Python Libraries
-
-```bash
-pip install customtkinter edge-tts pydub deep-translator
-```
-
-### Software Esterni
-
-- **FFmpeg**: Fondamentale per il mixaggio audio/video e il time-stretching. L'applicazione gestisce automaticamente il percorso tramite il file `ffmpeg_settings.txt` (che memorizza la directory di installazione), oppure può utilizzare l'eseguibile presente nel PATH di sistema.
-
-## 📖 Guida Rapida all'Uso
-
-1. **Avvio**: Avvia l'applicazione eseguendo il file principale:
-
-   ```bash
-   python main.py
-   ```
-
-2. **Carica i File**: Seleziona il file `.srt` dei sottotitoli e il video originale `.mp4`.
-3. **Scegli le Lingue**: Imposta la lingua sorgente (default: Ucraino `uk`) e quella di destinazione.
-4. **Configura Sincronizzazione**:
-    - Scegli se attivare la **"Sincronizzazione Forzata"** per una precisione temporale assoluta.
-    - Regola il **"Limite Velocità Max"** per definire quanto l'audio può essere accelerato senza distorsioni eccessive.
-5. **Regola il Mixaggio**: Utilizza i cursori per bilanciare il volume tra l'audio originale e quello tradotto.
-6. **Scegli l'Output**:
-   - **Video Completo**: Crea un nuovo video mixando le due tracce secondo i volumi impostati.
-   - **Solo Audio**: Esporta esclusivamente la traccia audio tradotta in `.mp3`.
-7. **Avvia**: Clicca su "AVVIA PRODUZIONE NEURALE" e monitora il progresso nella console e nella barra di avanzamento.
-
-## ⚙️ Dettagli Tecnici del Workflow
-
-1. **Analisi SRT**: Il software scompone l'SRT in segmenti con timestamp precisi.
-2. **Traduzione AI**: Ogni segmento viene tradotto via Google Translator (deep-translator).
-3. **Sintesi Neural**: Il testo tradotto viene inviato a Edge-TTS per generare un file audio MP3 di alta qualità.
-4. **Sincronizzazione**: L'audio viene accelerato/rallentato tramite il filtro `atempo` di FFmpeg se la durata supera il limite del sottotitolo.
-5. **Mixaggio Finale**: FFmpeg unisce le tracce utilizzando un complesso sistema di filtri (`amix`) per garantire un risultato professionale.
+- **Frontend (`gui.py`, `video_downloader_pro.py`)**: Sviluppato in `CustomTkinter`. Gestisce l'input utente, il binding dei dati tramite variabili di stato (`StringVar`, `DoubleVar`) e l'aggiornamento asincrono della UI via callback thread-safe (`self.after`).
+- **Core Logic (`logic.py`)**: Il cuore del sistema che orchestra la pipeline: *Parsing SRT $\rightarrow$ Traduzione AI $\rightarrow$ Sintesi Neurale TTS $\rightarrow$ Sincronizzazione Temporale $\rightarrow$ Mixaggio Audio/Video*.
+- **Configurazione e Risorse (`config.py`, `downloader_config.py`)**: Centralizza le costanti, la mappatura delle voci neurali e la gestione dinamica dei binari esterni (FFmpeg).
 
 ---
-*Sviluppato per automatizzare il doppiaggio video con la massima qualità possibile senza l'uso di API a pagamento.*
+
+## ⚙️ Specifiche Tecniche del Backend
+
+### 🎙️ Sintesi Vocale Neurale & Traduzione
+
+- **Edge-TTS**: Utilizza il protocollo neurale di Microsoft Edge per generare audio naturale. L'implementazione è asincrona (`asyncio`) per ottimizzare i tempi di risposta della rete.
+- **Google Translator**: Integrazione via `deep-translator` per la traduzione multilingua dei segmenti SRT.
+- **Resilienza API (Exponential Backoff)**: Per prevenire il ban dell'indirizzo IP (errore HTTP 429), l'applicazione implementa un algoritmo di *Exponential Backoff*. In caso di errore, il sistema attende intervalli crescenti (2s, 4s, 8s...) prima di riprovare.
+
+### ⏱️ Sincronizzazione Audio Avanzata
+
+Il problema della durata variabile dell'audio TTS rispetto al sottotitolo è risolto tramite:
+
+- **Time-Stretching via FFmpeg**: Utilizzo del filtro `atempo`, che permette di accelerare o rallentare l'audio senza alterarne il pitch (tono della voce), evitando l'effetto "chipmunk".
+- **Timeline Reconstruction**: Calcolo matematico dei silenzi tra i segmenti per garantire che ogni frase inizi esattamente al millisecondo previsto dal file SRT.
+
+### 🎬 Mixaggio Audio-Video Professionale
+
+Il mixaggio finale avviene tramite un `filter_complex` di FFmpeg:
+
+- **Dual Stream Scaling**: L'audio originale (Background) e quello tradotto (Foreground) vengono scalati indipendentemente in volume prima dell'unione.
+- **Sincronizzazione Durata**: Il parametro `duration=first` assicura che l'output termini esattamente con la fine del video originale.
+- **Stream Copy**: Il flusso video non viene ricodificato (`-c:v copy`), preservando la qualità originale e riducendo drasticamente i tempi di esportazione.
+
+---
+
+## 🚀 Motore di Download (Multi-Video Downloader)
+
+Il modulo integrato per il download dei contenuti si basa su `yt-dlp` e offre:
+
+- **Profili di Qualità**: Configurazione granulare tra compatibilità H.264, alta efficienza HEVC (H.265 con CRF 23), risoluzioni fisse (da 480p a 4K) o sola estrazione audio MP3 (320kbps).
+- **Bypass Restrizioni**: Supporto per l'estrazione automatica dei cookie dai browser installati (`chrome`, `firefox`, `edge`, ecc.) per scaricare contenuti protetti.
+- **Coda Asincrona**: Ogni download viene gestito in un thread separato, permettendo l'esecuzione di task multipli paralleli senza bloccare la GUI.
+
+---
+
+## 🛠️ Gestione FFmpeg & Dipendenze
+
+### Risoluzione Binari (Priority Path)
+
+L'applicazione risolve il percorso di FFmpeg seguendo una gerarchia di priorità:
+
+1. Percorso utente salvato in `ffmpeg_settings.txt`.
+2. Cartella `/bin/` locale nel progetto.
+3. Directory temporanea `_MEIPASS` (per versioni compilate in `.exe`).
+4. Comando globale nel PATH di sistema.
+
+### Auto-Update Engine
+
+Il sistema verifica autonomamente la versione di FFmpeg. Se assente o obsoleta, scarica automaticamente l'ultima build *win64-gpl-shared* da GitHub, estrae i binari e le DLL necessarie e configura il sistema per l'utilizzo immediato.
+
+---
+
+## 📖 Requisiti & Avvio
+
+### Librerie Python
+
+```bash
+pip install customtkinter edge-tts pydub deep-translator yt-dlp
+```
+
+### Esecuzione
+
+```bash
+python main.py
+```
+
+---
+*Sviluppato per automatizzare il doppiaggio video con l'integrazione di tecnologie neurali e processing audio professionale.*

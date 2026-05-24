@@ -8,6 +8,14 @@ from downloader_config import FORMAT_CONFIG
 from downloader_logic import is_valid_url, run_download_process
 
 class DownloadJobRow(ctk.CTkFrame):
+    """
+    Componente UI per la rappresentazione di un singolo job di download.
+
+    RUOLO TECNICO:
+    - Incapsula l'estetica della riga di download (Nome, Barra Progresso, Stato).
+    - Gestisce l'animazione a 'impulso' durante la fase di merge (unione audio/video), 
+      fornendo un feedback visivo all'utente mentre FFmpeg elabora i file.
+    """
     def __init__(self, master, filename="Download in corso..."):
         super().__init__(master)
         self.pack(fill="x", padx=10, pady=5)
@@ -47,6 +55,15 @@ class DownloadJobRow(ctk.CTkFrame):
         self.after(0, lambda: self.lbl_status.configure(text=text, text_color=color))
 
 class YoutubeDownloaderGUI(ctk.CTkToplevel):
+    """
+    Interfaccia per il modulo di download multi-video.
+
+    ARCHITETTURA TECNICA:
+    - Gestisce la configurazione dei parametri di download (Browser, Qualità, Preset FFmpeg).
+    - Implementa una coda di download asincrona: ogni URL inserito avvia un nuovo Thread 
+      che esegue `run_download_process`, permettendo download multipli paralleli senza bloccare l'UI.
+    - Integrazione con `config.py` per l'aggiornamento dinamico del motore FFmpeg.
+    """
     def __init__(self):
         super().__init__()
         self.title("ꑭ 🚀 MULTI-VIDEO DOWNLOADER ULTRA PRO v1.9.1 By Banderivez ꑭ")
@@ -147,6 +164,17 @@ class YoutubeDownloaderGUI(ctk.CTkToplevel):
         self.preset_menu.configure(state="normal" if config.get("preset_support", False) else "disabled")
 
     def start_download_thread(self):
+        """
+        Avvia l'esecuzione del download in un thread separato.
+
+        FLUSSO TECNICO:
+        1. Validazione URL tramite regex (`is_valid_url`).
+        2. Istanziazione di `DownloadJobRow` per aggiungere visivamente il task alla coda UI.
+        3. Mapping dei parametri della GUI (selettori, variabili di stato) in un dizionario 
+           da passare a `run_download_process`.
+        4. Esecuzione via `threading.Thread` con flag `daemon=True` per assicurare che 
+           il thread termini se la finestra principale viene chiusa.
+        """
         url = self.entry_url.get().strip()
         if not is_valid_url(url): return messagebox.showerror("Errore", "Inserisci un URL valido!")
         

@@ -17,8 +17,13 @@ from video_downloader_pro import YoutubeDownloaderGUI
 
 class App(ctk.CTk):
     """
-    Classe principale dell'interfaccia grafica basata su CustomTkinter.
-    Gestisce l'input dell'utente, la visualizzazione dei progressi e i log.
+    Classe principale dell'interfaccia grafica (GUI) basata su CustomTkinter.
+
+    RUOLO TECNICO:
+    - Gestisce l'albero dei widget e il layout della finestra principale.
+    - Implementa il binding tra gli input utente (StringVar, DoubleVar) e la logica di business.
+    - Fornisce i metodi di callback (`update_log`, `update_progress`) che permettono al 
+      backend (`VideoTranslatorLogic`) di comunicare con l'interfaccia in modo asincrono.
     """
     def __init__(self):
         super().__init__()
@@ -168,12 +173,22 @@ class App(ctk.CTk):
     # METODI DI SUPPORTO GUI
     # ----------------------------------------------------------------------
     def update_log(self, message):
-        """Aggiunge un messaggio al log con timestamp."""
+        """
+        Aggiunge un messaggio al log con timestamp.
+        Nota: Questo metodo viene chiamato sia dal thread principale che dai thread di lavoro.
+        CustomTkinter gestisce l'inserimento in modo relativamente sicuro, ma per 
+        operazioni più complesse si dovrebbe usare self.after().
+        """
         self.log_text.insert("end", f"[{datetime.now().strftime('%H:%M:%S')}] {message}\n")
         self.log_text.see("end")
 
     def update_progress(self, value, text):
-        """Aggiorna la barra di progresso e il testo associato (Thread-safe)."""
+        """
+        Aggiorna la barra di progresso e il testo associato.
+        IMPLEMENTAZIONE THREAD-SAFE: 
+        Poiché Tkinter non è thread-safe, utilizziamo `self.after(0, ...)` per schedulare 
+        l'aggiornamento della UI sul thread principale (Main Thread), evitando crash o comportamenti instabili.
+        """
         self.after(0, lambda: self._set_progress(value, text))
 
     def _set_progress(self, value, text):
@@ -241,8 +256,14 @@ class App(ctk.CTk):
 
     def start_production(self):
         """
-        Metodo principale che convalida gli input e avvia il processo di traduzione 
-        in un thread separato per non bloccare l'interfaccia grafica.
+        Orchestratore del processo di produzione neurale.
+
+        FLUSSO TECNICO:
+        1. Validazione degli input (controlla che i path obbligatori siano presenti).
+        2. Creazione di un file temporaneo per l'audio tradotto (`tempfile`).
+        3. Avvio di un Thread separato: questo è fondamentale per evitare il 'freeze' 
+           della GUI durante le chiamate API (Traduzione e TTS) e l'elaborazione FFmpeg.
+        4. Gestione della pipeline: Generazione Audio -> Mixaggio Video (opzionale) -> Pulizia Temporanei.
         """
         srt = self.entry_srt.get().strip()
         vid = self.entry_vid.get().strip()

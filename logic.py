@@ -16,8 +16,12 @@ import config
 
 class VideoTranslatorLogic:
     """
-    Classe che gestisce l'intera pipeline di elaborazione audio e video.
-    Si occupa della traduzione, della sintesi vocale neurale e del mixaggio finale.
+    CORE ENGINE di elaborazione neurale per la traduzione audio-video.
+
+    RUOLO TECNICO:
+    - Orchestrazione della pipeline: SRT -> Traduzione -> TTS Neurale -> Sincronizzazione Temporale -> Mixaggio.
+    - Gestione della resilienza tramite Exponential Backoff per le chiamate API esterne.
+    - Manipolazione digitale dell'audio via pydub e FFmpeg (time-stretching senza pitch shift).
     """
     def __init__(self, log_callback, progress_callback=None):
         """
@@ -30,9 +34,13 @@ class VideoTranslatorLogic:
 
     def execute_with_retry(self, func, *args, max_retries=3, initial_delay=2, **kwargs):
         """
-        Esegue una funzione implementando l'algoritmo di 'Exponential Backoff'.
-        Se la funzione fallisce (es. errore API), attende un tempo crescente prima di riprovare.
-        Questo evita il ban dai server in caso di troppe richieste rapide.
+        Implementa un meccanismo di resilienza tramite Exponential Backoff.
+
+        LOGICA TECNICA:
+        In caso di eccezione (tipicamente errori HTTP 429 Too Many Requests), il sistema
+        attende un intervallo che raddoppia ad ogni tentativo (2s, 4s, 8s...).
+        Questo approccio è fondamentale per interagire con API gratuite (Google Translate, Edge-TTS)
+        evitando il ban temporaneo dell'indirizzo IP.
         """
         last_exception = None
         for attempt in range(max_retries):
@@ -56,8 +64,15 @@ class VideoTranslatorLogic:
 
     def stretch_audio(self, audio_segment, target_duration_ms, force_sync=False, max_speed=1.5):
         """
-        Adatta la durata di un segmento audio per farlo rientrare nel tempo disponibile del sottotitolo.
-        Usa il filtro 'atempo' di FFmpeg che cambia la velocità senza alterare il pitch (tono della voce).
+        Sincronizzatore temporale del segmento audio tramite Time-Stretching.
+
+        DETTAGLI TECNICI:
+        Il problema principale è che la sintesi vocale (TTS) produce audio di durata variabile, 
+        spesso diversa dalla finestra temporale definita nel file SRT.
+        Per risolvere questo, utilizziamo il filtro `atempo` di FFmpeg:
+        - A differenza della riproduzione veloce standard, `atempo` altera la velocità 
+          di lettura senza cambiare la frequenza fondamentale (Pitch), mantenendo la voce naturale.
+        - Se `force_sync=False`, l'accelerazione è limitata a `max_speed` per evitare l'effetto "chipmunk".
         """
         current_duration_ms = len(audio_segment)
         if current_duration_ms <= target_duration_ms:
@@ -102,8 +117,13 @@ class VideoTranslatorLogic:
 
     async def _async_tts_generate(self, text, lang_code):
         """
-        Genera l'audio neurale utilizzando la libreria edge-tts in modo asincrono.
-        Crea un file temporaneo che viene poi letto da pydub e immediatamente eliminato.
+        Interfaccia asincrona per la generazione di sintesi vocale neurale.
+
+        IMPLEMENTAZIONE:
+        - Utilizza il protocollo Microsoft Edge TTS via `edge-tts`.
+        - Poiché l'operazione è I/O bound (richiesta di rete), è implementata come coroutine (`async`).
+        - Il flusso audio viene salvato in un file temporaneo sul disco, caricato in memoria 
+          come oggetto `AudioSegment` e successivamente il file fisico viene rimosso.
         """
         import edge_tts # Import locale per evitare conflitti di asyncio all'avvio
         voice = config.VOICE_MAP.get(lang_code, "en-US-GuyNeural")
@@ -144,11 +164,16 @@ class VideoTranslatorLogic:
 
     def generate_synced_audio(self, srt_file, output_file, src_lang='en', tgt_lang='it', force_sync=False, max_speed=1.5):
         """
-        Workflow principale per creare la traccia audio tradotta e sincronizzata.
-        1. Analizza il file SRT.
-        2. Genera audio in parallelo tramite ThreadPoolExecutor.
-        3. Applica lo stretching temporale per ogni frase.
-        4. Unisce i segmenti inserendo i silenzi necessari tra una frase e l'altra.
+        Pipeline di produzione della traccia audio tradotta e sincronizzata.
+
+        FLUSSO TECNICO DETTAGLIATO:
+        1. PARSING SRT: Estrazione dei timestamp (inizio/fine) e del testo. Calcolo della durata massima (`limit`).
+        2. PARALLELIZZAZIONE: Utilizzo di `ThreadPoolExecutor` per eseguire traduzioni e TTS in parallelo. 
+           Il numero di worker è limitato per evitare il Rate Limiting dei server Microsoft.
+        3. SINCRONIZZAZIONE (Stretching): Per ogni segmento, se la durata TTS > limite SRT, viene applicato lo stretch audio.
+        4. RICOSTRUZIONE TIMELINE: Inserimento di segmenti di silenzio (`AudioSegment.silent`) calcolati come 
+           differenza tra l'inizio del segmento corrente e la fine del precedente.
+        5. EXPORT: Rendering finale in MP3 a 320kbps.
         """
         try:
             self.log(f"⏳ Analisi SRT e Traduzione AI ({src_lang} -> {tgt_lang})...")
@@ -219,8 +244,15 @@ class VideoTranslatorLogic:
 
     def merge_audio_video_mixed(self, video_path, translated_audio_path, output_video_path, vol_orig=0.4, vol_trans=1.0):
         """
-        Effettua il mixaggio finale tra l'audio originale del video e la nuova traccia tradotta.
-        Usa un filtro complesso di FFmpeg per regolare i volumi in modo indipendente e unire le tracce.
+        Mixer audio-video finale tramite FFmpeg Filter Complex.
+
+        ANALISI TECNICA DEL FILTRO:
+        Viene costruita una catena di filtri (`filter_complex`) che opera come segue:
+        - [0:a]volume={vol_orig}[bg]: Prende l'audio del video originale e ne scala il volume (Background).
+        - [1:a]volume={vol_trans}[fg]: Prende la traccia tradotta e ne scala il volume (Foreground).
+        - amix=inputs=2:duration=first[out]: Mixa i due flussi in uno solo. `duration=first` assicura 
+          che l'output termini quando finisce il video originale, evitando silenzi finali se l'audio è più lungo.
+        - -c:v copy: Evita la ricodifica del video (Stream Copy), mantenendo la qualità originale e velocizzando il processo.
         """
         try:
             self.log(f"🎬 Mixaggio finale (Orig: {vol_orig}, Trad: {vol_trans})...")

@@ -7,10 +7,15 @@ import shutil
 import subprocess
 
 # ==============================================================================
-# CONFIGURAZIONI E COSTANTI
+# MODULO DI CONFIGURAZIONE SISTEMA E RISORSE ESTERNE
 # ==============================================================================
+"""
+Questo modulo centralizza le costanti globali e la gestione delle dipendenze esterne (FFmpeg).
+Assicura che l'applicazione possa operare sia in ambiente di sviluppo che come eseguibile compilato.
+"""
 
 # Mappatura Lingue -> Voci Neurali Microsoft Edge
+# Queste voci sono fornite tramite il protocollo edge-tts e richiedono una connessione internet.
 VOICE_MAP = {
     "en": "en-US-GuyNeural",   # Inglese USA - Voce maschile
     "it": "it-IT-DiegoNeural", # Italiano - Voce maschile
@@ -24,7 +29,13 @@ VOICE_MAP = {
 }
 
 def get_ffmpeg_path():
-    """Determina il percorso di FFmpeg: Config file -> ./bin/ -> PyInstaller -> System PATH."""
+    """
+    Risolve il percorso dell'eseguibile FFmpeg seguendo un ordine di priorità gerarchico:
+    1. Directory personalizzata salvata dall'utente in `ffmpeg_settings.txt`.
+    2. Cartella `/bin/` locale nella root del progetto.
+    3. Cartella temporanea di PyInstaller (`_MEIPASS`), fondamentale per i file bundle .exe.
+    4. Fallback al comando 'ffmpeg', assumendo che sia presente nel PATH di sistema.
+    """
     # Prova a recuperare il percorso dall'install dir salvata nelle impostazioni
     install_dir = get_ffmpeg_install_dir()
     ffmpeg_exe = os.path.join(install_dir, 'ffmpeg.exe')
@@ -62,7 +73,18 @@ def save_ffmpeg_install_dir(path):
         f.write(path)
 
 def check_and_update_ffmpeg(custom_install_dir=None):
-    """Verifica la presenza di FFmpeg e lo aggiorna se necessario o obsoleto."""
+    """
+    Implementa l'auto-aggiornamento del motore FFmpeg.
+    
+    LOGICA TECNICA:
+    1. Verifica se `ffmpeg.exe` esiste nel percorso configurato.
+    2. Se esiste, esegue `ffmpeg -version` e controlla se l'output contiene "2024" 
+       (metodo semplificato per identificare versioni obsolete).
+    3. In caso di assenza o obsolescenza:
+       - Scarica l'ultima release build win64-gpl-shared da GitHub.
+       - Estrae il file ZIP in una cartella temporanea `temp_ffmpeg`.
+       - Copia ricorsivamente tutti i binari e le DLL necessarie nella directory di installazione finale.
+    """
     install_dir = custom_install_dir if custom_install_dir else get_ffmpeg_install_dir()
     local_ffmpeg_exe = os.path.join(install_dir, 'ffmpeg.exe')
     
