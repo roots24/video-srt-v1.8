@@ -100,7 +100,7 @@ def check_and_update_ffmpeg(custom_install_dir=None):
         exists = os.path.exists(local_ffmpeg_exe)
         is_old = False
         if exists:
-            res = subprocess.run([local_ffmpeg_exe, '-version'], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            res = subprocess.run([local_ffmpeg_exe, '-version'], capture_output=True, text=True)
             if "2024" not in res.stdout:
                 is_old = True
 
