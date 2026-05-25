@@ -103,7 +103,7 @@ class VideoTranslatorLogic:
         try:
             # Comando FFmpeg per cambiare velocità senza alterare il pitch
             cmd = [config.FFMPEG_BIN, '-y', '-i', temp_in, '-filter:a', f"atempo={speed_factor}", temp_out]
-            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
             stretched_audio = AudioSegment.from_file(temp_out)
         except subprocess.CalledProcessError as e:
             self.log(f"❌ Errore FFmpeg durante stretch audio: {e}")
@@ -266,7 +266,7 @@ class VideoTranslatorLogic:
                 '-filter_complex', filter_complex, '-map', '0:v:0', '-map', '[out]', 
                 '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', output_video_path
             ]
-            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW)
             self.log(f"🚀 VIDEO FINALE PRONTO!")
         except Exception as e:
             self.log(f"❌ Errore mixaggio finale: {e}")
