@@ -54,45 +54,7 @@ class VideoTranslatorLogic:
                 time.sleep(delay)
         raise last_exception
 
-    def batch_translate(self, texts, src_lang, tgt_lang, batch_size=30):
-        """
-        Traduce un elenco di testi in blocchi per ridurre il numero di chiamate API e prevenire il rate limiting.
-        """
-        if src_lang == tgt_lang:
-            return texts
-
-        translated_texts = []
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            # Uniamo i segmenti con un delimitatore univoco per tradurli in un'unica richiesta
-            combined_text = "\n|||\n".join(batch)
-            
-            def do_translate():
-                return GoogleTranslator(source=src_lang, target=tgt_lang).translate(combined_text)
-            
-            try:
-                translated_combined = self.execute_with_retry(do_translate)
-                # Dividiamo il risultato basandoci sul delimitatore (o tentativo di ricostruzione se il traduttore lo ha alterato)
-                split_texts = translated_combined.split("\n|||\n")
-                
-                # Gestione caso in cui il traduttore abbia rimosso o alterato il delimitatore
-                if len(split_texts) != len(batch):
-                    self.log(f"⚠️ Errore batch translation al segmento {i}. Riprovo singolarmente...")
-                    for t in batch:
-                        translated_texts.append(self.execute_with_retry(lambda text=t: GoogleTranslator(source=src_lang, target=tgt_lang).translate(text)))
-                else:
-                    translated_texts.extend([t.strip() for t in split_texts])
-            except Exception as e:
-                self.log(f"❌ Errore critico durante batch translation {i}: {e}")
-                # Fallback a traduzione singola per il batch fallito
-                for t in batch:
-                    try:
-                        translated_texts.append(self.execute_with_retry(lambda text=t: GoogleTranslator(source=src_lang, target=tgt_lang).translate(text)))
-                    except:
-                        translated_texts.append("[Errore Traduzione]")
-        
-        return translated_texts
-
+    def srt_time_to_ms(self, time_str):
         """
         Converte una stringa di tempo in formato SRT (00:00:00,000) in millisecondi totali.
         Utile per calcolare precise durate e posizionamenti audio tramite pydub.
@@ -141,7 +103,7 @@ class VideoTranslatorLogic:
         try:
             # Comando FFmpeg per cambiare velocità senza alterare il pitch
             cmd = [config.FFMPEG_BIN, '-y', '-i', temp_in, '-filter:a', f"atempo={speed_factor}", temp_out]
-            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
             stretched_audio = AudioSegment.from_file(temp_out)
         except subprocess.CalledProcessError as e:
             self.log(f"❌ Errore FFmpeg durante stretch audio: {e}")
@@ -202,15 +164,19 @@ class VideoTranslatorLogic:
 
     def generate_synced_audio(self, srt_file, output_file, src_lang='en', tgt_lang='it', force_sync=False, max_speed=1.5):
         """
-        Pipeline di produzione della traccia audio tradotta e sincronizzata, ottimizzata per video lunghi.
-        
-        Miglioramenti apportati per video lunghi:
-        1. TRADUZIONE BATCH: Riduzione drastica delle chiamate API Google Translate.
-        2. TTS PARALLELO: Generazione vocale neurale multi-threaded.
-        3. ASSEMBLAGGIO SU DISCO: Utilizzo di FFmpeg concat invece della RAM per evitare crash su file enormi.
+        Pipeline di produzione della traccia audio tradotta e sincronizzata.
+
+        FLUSSO TECNICO DETTAGLIATO:
+        1. PARSING SRT: Estrazione dei timestamp (inizio/fine) e del testo. Calcolo della durata massima (`limit`).
+        2. PARALLELIZZAZIONE: Utilizzo di `ThreadPoolExecutor` per eseguire traduzioni e TTS in parallelo. 
+           Il numero di worker è limitato per evitare il Rate Limiting dei server Microsoft.
+        3. SINCRONIZZAZIONE (Stretching): Per ogni segmento, se la durata TTS > limite SRT, viene applicato lo stretch audio.
+        4. RICOSTRUZIONE TIMELINE: Inserimento di segmenti di silenzio (`AudioSegment.silent`) calcolati come 
+           differenza tra l'inizio del segmento corrente e la fine del precedente.
+        5. EXPORT: Rendering finale in MP3 a 320kbps.
         """
         try:
-            self.log(f"⏳ Analisi SRT e Traduzione AI in batch ({src_lang} -> {tgt_lang})...")
+            self.log(f"⏳ Analisi SRT e Traduzione AI ({src_lang} -> {tgt_lang})...")
             segments_data = [] 
             with open(srt_file, 'r', encoding='utf-8') as f:
                 content = f.read().strip().split('\n\n')
@@ -226,91 +192,55 @@ class VideoTranslatorLogic:
                     })
 
             total_segments = len(segments_data)
-            texts_to_translate = [s['text'] for s in segments_data]
-            
-            # 1. Traduzione in Batch (Riduce rischio ban e accelera processo)
-            translated_texts = self.batch_translate(texts_to_translate, src_lang, tgt_lang)
-            
             self.log(f"⚡ Generazione Audio Neurale in parallelo ({total_segments} segmenti)...")
             
-            # 2. TTS Parallelo
+            # Limitiamo i worker per evitare di essere bloccati dai server Microsoft (Rate Limiting)
             max_workers = min(os.cpu_count() * 2 if os.cpu_count() else 4, 12)
-            results_map = {}
             
-            def process_tts(idx):
-                text = translated_texts[idx]
-                try:
-                    # Generazione TTS asincrona wrappata in sincrona per ThreadPoolExecutor
-                    audio = asyncio.run(self._async_tts_generate(text, tgt_lang))
-                    return idx, audio
-                except Exception as e:
-                    self.log(f"❌ Errore TTS segmento {idx}: {e}")
-                    return idx, None
-
+            results_map = {}
+            tts_tasks = [(s['id'], s['text'], s['start'], src_lang, tgt_lang) for s in segments_data]
+            
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = [executor.submit(process_tts, i) for i in range(total_segments)]
+                future_to_idx = {executor.submit(self.translate_and_fetch_tts, task): task[0] for task in tts_tasks}
                 completed_count = 0
-                for future in as_completed(futures):
-                    idx, audio = future.result()
-                    results_map[idx] = audio
+                for future in as_completed(future_to_idx):
+                    res = future.result()
+                    results_map[res[0]] = res
                     completed_count += 1
                     if self.update_progress:
                         progress_val = completed_count / total_segments
                         self.update_progress(progress_val, f"Elaborazione neurale segmento {completed_count} di {total_segments}")
 
-            # 3. Assemblaggio Audio su Disco (Evita MemoryError per video lunghi)
-            self.log("🎬 Sincronizzazione e assemblaggio finale traccia audio...")
-            
-            temp_files = []
+            # Costruzione della timeline audio finale
+            audio_pipeline = []
             last_end_time = 0
-            
-            with tempfile.TemporaryDirectory() as tmpdir:
-                for idx in range(total_segments):
-                    if idx not in results_map or results_map[idx] is None: continue
-                    
-                    phrase_audio = results_map[idx]
-                    limit_ms = segments_data[idx]['limit']
-                    start_ms = segments_data[idx]['start']
-                    
-                    # Sincronizzazione (Stretch)
-                    phrase_audio = self.stretch_audio(phrase_audio, limit_ms, force_sync=force_sync, max_speed=max_speed)
-                    
-                    # Gestione Silenzio pre-frase
-                    silence_duration = start_ms - last_end_time
-                    if silence_duration > 0:
-                        sil_path = os.path.join(tmpdir, f"sil_{idx}.mp3")
-                        AudioSegment.silent(duration=silence_duration).export(sil_path, format="mp3")
-                        temp_files.append(sil_path)
-                    
-                    # Salvataggio frase su disco
-                    phrase_path = os.path.join(tmpdir, f"phrase_{idx}.mp3")
-                    phrase_audio.export(phrase_path, format="mp3")
-                    temp_files.append(phrase_path)
-                    
-                    last_end_time = start_ms + len(phrase_audio)
 
-                # Creazione file di lista per FFmpeg concat demuxer
-                concat_list_path = os.path.join(tmpdir, "concat.txt")
-                with open(concat_list_path, 'w', encoding='utf-8') as f:
-                    for path in temp_files:
-                        # FFmpeg richiede percorsi con slash e quoting se ci sono spazi
-                        f.write(f"file '{os.path.abspath(path)}'\n")
+            for idx in range(total_segments):
+                if idx not in results_map: continue
+                _, phrase_audio, start_ms = results_map[idx]
+                if phrase_audio is None: continue
+                
+                limit_ms = segments_data[idx]['limit']
+                phrase_audio = self.stretch_audio(phrase_audio, limit_ms, force_sync=force_sync, max_speed=max_speed)
+                
+                # Calcolo del silenzio necessario prima di questa frase per mantenerla in sincro con il video
+                silence_duration = start_ms - last_end_time
+                if silence_duration > 0:
+                    audio_pipeline.append(AudioSegment.silent(duration=silence_duration))
+                
+                audio_pipeline.append(phrase_audio)
+                last_end_time = start_ms + len(phrase_audio)
 
-                # Concatenazione finale tramite FFmpeg (molto più veloce e leggero della RAM)
-                cmd = [
-                    config.FFMPEG_BIN, '-y', '-f', 'concat', '-safe', '0', 
-                    '-i', concat_list_path, '-c', 'copy', output_file
-                ]
-                subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
+            final_audio = AudioSegment.empty()
+            for segment in audio_pipeline:
+                final_audio += segment
+                
+            final_audio.export(output_file, format="mp3", bitrate="320k")
             self.log(f"✅ Traccia audio neurale creata con successo!")
             return True
         except Exception as e:
             self.log(f"❌ Errore generazione audio: {e}")
-            import traceback
-            self.log(traceback.format_exc())
             return False
-
 
     def merge_audio_video_mixed(self, video_path, translated_audio_path, output_video_path, vol_orig=0.4, vol_trans=1.0):
         """
@@ -336,7 +266,7 @@ class VideoTranslatorLogic:
                 '-filter_complex', filter_complex, '-map', '0:v:0', '-map', '[out]', 
                 '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', output_video_path
             ]
-            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW)
             self.log(f"🚀 VIDEO FINALE PRONTO!")
         except Exception as e:
             self.log(f"❌ Errore mixaggio finale: {e}")
