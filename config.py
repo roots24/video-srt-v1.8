@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 import customtkinter as ctk
 import urllib.request 
 import zipfile 
@@ -17,15 +18,15 @@ Assicura che l'applicazione possa operare sia in ambiente di sviluppo che come e
 # Mappatura Lingue -> Voci Neurali Microsoft Edge
 # Queste voci sono fornite tramite il protocollo edge-tts e richiedono una connessione internet.
 VOICE_MAP = {
-    "en": "en-US-GuyNeural",   # Inglese USA - Voce maschile
-    "it": "it-IT-DiegoNeural", # Italiano - Voce maschile
-    "es": "es-ES-AlvaroNeural", # Spagnolo - Voce maschile
-    "fr": "fr-FR-HenriNeural",  # Francese - Voce maschile
-    "de": "de-DE-ConradNeural", # Tedesco - Voce maschile
-    "zh": "zh-CN-YunxiNeural",  # Cinese - Voce maschile
-    "uk": "uk-UA-OstapNeural",  # Ucraino - Voce maschile
-    "sv": "sv-SE-SvenNeural",   # Svedese - Voce maschile
-    "nl": "nl-NL-MaartenNeural", # Olandese - Voce maschile
+    "en": {"male": "en-US-GuyNeural", "female": "en-US-AriaNeural"},
+    "it": {"male": "it-IT-DiegoNeural", "female": "it-IT-ElsaNeural"},
+    "es": {"male": "es-ES-AlvaroNeural", "female": "es-ES-LiaNeural"},
+    "fr": {"male": "fr-FR-HenriNeural", "female": "fr-FR-VivienneNeural"},
+    "de": {"male": "de-DE-ConradNeural", "female": "de-DE-KatjaNeural"},
+    "zh": {"male": "zh-CN-YunxiNeural", "female": "zh-CN-XiaoxiaoNeural"},
+    "uk": {"male": "uk-UA-OstapNeural", "female": "uk-UA-PolinaNeural"},
+    "sv": {"male": "sv-SE-SvenNeural", "female": "sv-SE-SofieNeural"},
+    "nl": {"male": "nl-NL-MaartenNeural", "female": "nl-NL-FennaNeural"},
 }
 
 def get_ffmpeg_path():
@@ -46,11 +47,11 @@ def get_ffmpeg_path():
     if os.path.exists(local_bin): return local_bin
 
     if hasattr(sys, '_MEIPASS'):
-        # Verifica sia nella root del bundle che nella sottocartella ffempeg/
+        # Verifica sia nella root del bundle che nella sottocartella ffmpeg/
         bundled_root = sys._MEIPASS
         paths_to_check = [
             os.path.join(bundled_root, 'ffmpeg.exe'),
-            os.path.join(bundled_root, 'ffempeg', 'ffmpeg.exe')
+            os.path.join(bundled_root, 'ffmpeg', 'ffmpeg.exe')
         ]
         for p in paths_to_check:
             if os.path.exists(p): return p
@@ -101,7 +102,8 @@ def check_and_update_ffmpeg(custom_install_dir=None):
         is_old = False
         if exists:
             res = subprocess.run([local_ffmpeg_exe, '-version'], capture_output=True, text=True)
-            if "2024" not in res.stdout:
+            version_match = re.search(r'20\d{2}', res.stdout)
+            if not version_match or int(version_match.group()) < 2024:
                 is_old = True
 
         if not exists or is_old:

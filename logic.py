@@ -31,6 +31,7 @@ class VideoTranslatorLogic:
         """
         self.log = log_callback
         self.update_progress = progress_callback
+        self._cache = {}
 
     def execute_with_retry(self, func, *args, max_retries=3, initial_delay=2, **kwargs):
         """
@@ -54,6 +55,20 @@ class VideoTranslatorLogic:
                 time.sleep(delay)
         raise last_exception
 
+    def ffmpeg_execute_with_retry(self, cmd, max_retries=3, initial_delay=2):
+        """Retry logic per comandi FFmpeg (stretching/mixing)."""
+        last_exception = None
+        for attempt in range(max_retries):
+            try:
+                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                return result
+            except subprocess.CalledProcessError as e:
+                last_exception = e
+                delay = initial_delay * (2 ** attempt)
+                self.log(f"⚠️ Tentativo FFmpeg {attempt + 1}/{max_retries} fallito. Riprovo tra {delay}s...")
+                time.sleep(delay)
+        raise last_exception
+
     def srt_time_to_ms(self, time_str):
         """
         Converte una stringa di tempo in formato SRT (00:00:00,000) in millisecondi totali.
@@ -74,6 +89,41 @@ class VideoTranslatorLogic:
           di lettura senza cambiare la frequenza fondamentale (Pitch), mantenendo la voce naturale.
         - Se `force_sync=False`, l'accelerazione è limitata a `max_speed` per evitare l'effetto "chipmunk".
         """
+        current_duration_ms = len(audio_segment)
+        if current_duration_ms <= target_duration_ms:
+            return audio_segment
+
+        speed_factor = current_duration_ms / target_duration_ms
+        
+        if speed_factor > 1.3:
+            self.log(f"⚠️ Attenzione: Segmento molto compresso ({speed_factor:.2f}x). Potrebbe risultare innaturale.")
+
+        if not force_sync:
+            if speed_factor > max_speed:
+                self.log(f"⚠️ Segmento troppo lungo ({speed_factor:.2f}x). Limitando a {max_speed:.2f}x per qualità.")
+                speed_factor = max_speed
+        else:
+            self.log(f"⚡ Sincronizzazione Forzata: applicando velocità esatta {speed_factor:.2f}x")
+
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf_in:
+            temp_in = tf_in.name
+            audio_segment.export(temp_in, format="mp3")
+
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf_out:
+            temp_out = tf_out.name
+
+        try:
+            cmd = [config.FFMPEG_BIN, '-y', '-i', temp_in, '-filter:a', f"atempo={speed_factor}", temp_out]
+            self.ffmpeg_execute_with_retry(cmd)
+            stretched_audio = AudioSegment.from_file(temp_out)
+        except subprocess.CalledProcessError as e:
+            self.log(f"❌ Errore FFmpeg durante stretch audio: {e}")
+            return audio_segment
+        finally:
+            if os.path.exists(temp_in): os.remove(temp_in)
+            if os.path.exists(temp_out): os.remove(temp_out)
+
+        return stretched_audio
         current_duration_ms = len(audio_segment)
         if current_duration_ms <= target_duration_ms:
             return audio_segment
@@ -115,7 +165,7 @@ class VideoTranslatorLogic:
 
         return stretched_audio
 
-    async def _async_tts_generate(self, text, lang_code):
+    async def _async_tts_generate(self, text, lang_code, gender="male"):
         """
         Interfaccia asincrona per la generazione di sintesi vocale neurale.
 
@@ -126,7 +176,15 @@ class VideoTranslatorLogic:
           come oggetto `AudioSegment` e successivamente il file fisico viene rimosso.
         """
         import edge_tts # Import locale per evitare conflitti di asyncio all'avvio
-        voice = config.VOICE_MAP.get(lang_code, "en-US-GuyNeural")
+        
+        cache_key = f"{text}_{lang_code}_{gender}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+        
+        voice_map = config.VOICE_MAP.get(lang_code)
+        if not voice_map:
+            voice_map = {"male": "en-US-GuyNeural", "female": "en-US-AriaNeural"}
+        voice = voice_map.get(gender, voice_map["male"])
         communicate = edge_tts.Communicate(text, voice)
         
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf:
@@ -135,6 +193,7 @@ class VideoTranslatorLogic:
         
         audio = AudioSegment.from_file(temp_path)
         os.remove(temp_path)
+        self._cache[cache_key] = audio
         return audio
 
     def translate_and_fetch_tts(self, data):
@@ -142,19 +201,29 @@ class VideoTranslatorLogic:
         Metodo wrapper che coordina la traduzione del testo e la successiva generazione TTS.
         Viene eseguito all'interno di un ThreadPoolExecutor per parallelizzare le richieste.
         """
-        idx, text, start_ms, src_lang, tgt_lang = data
+        idx, text, start_ms, src_lang, tgt_lang, gender = data
+        
+        cache_key = f"{text}_{src_lang}_{tgt_lang}"
+        if cache_key in self._cache:
+            translated_text = self._cache[cache_key]
+        else:
+            try:
+                # 1. Traduzione tramite Google Translator
+                def do_translate():
+                    if src_lang != tgt_lang:
+                        return GoogleTranslator(source=src_lang, target=tgt_lang).translate(text)
+                    return text
+
+                translated_text = self.execute_with_retry(do_translate)
+                self._cache[cache_key] = translated_text
+            except Exception as e:
+                self.log(f"❌ Errore traduzione segmento {idx}: {e}")
+                return idx, None, start_ms
+        
         try:
-            # 1. Traduzione tramite Google Translator
-            def do_translate():
-                if src_lang != tgt_lang:
-                    return GoogleTranslator(source=src_lang, target=tgt_lang).translate(text)
-                return text
-
-            translated_text = self.execute_with_retry(do_translate)
-
             # 2. Sintesi Vocale Neurale (Edge-TTS richiede asyncio per funzionare)
             def do_tts():
-                return asyncio.run(self._async_tts_generate(translated_text, tgt_lang))
+                return asyncio.run(self._async_tts_generate(translated_text, tgt_lang, gender))
 
             phrase_audio = self.execute_with_retry(do_tts)
             return idx, phrase_audio, start_ms
@@ -162,43 +231,80 @@ class VideoTranslatorLogic:
             self.log(f"❌ Errore critico segmento {idx}: {e}")
             return idx, None, start_ms
 
-    def generate_synced_audio(self, srt_file, output_file, src_lang='en', tgt_lang='it', force_sync=False, max_speed=1.5):
+    def generate_synced_audio(self, srt_file, output_file, src_lang='en', tgt_lang='it', gender='male', force_sync=False, max_speed=1.5):
         """
         Pipeline di produzione della traccia audio tradotta e sincronizzata.
 
         FLUSSO TECNICO DETTAGLIATO:
-        1. PARSING SRT: Estrazione dei timestamp (inizio/fine) e del testo. Calcolo della durata massima (`limit`).
+        1. PARSING SRT: Estrazione dei timestamp (inizio/fine) e del testo con validazione. Calcolo della durata massima (`limit`).
         2. PARALLELIZZAZIONE: Utilizzo di `ThreadPoolExecutor` per eseguire traduzioni e TTS in parallelo. 
-           Il numero di worker è limitato per evitare il Rate Limiting dei server Microsoft.
+            Il numero di worker è adattato dinamicamente al CPU count.
         3. SINCRONIZZAZIONE (Stretching): Per ogni segmento, se la durata TTS > limite SRT, viene applicato lo stretch audio.
         4. RICOSTRUZIONE TIMELINE: Inserimento di segmenti di silenzio (`AudioSegment.silent`) calcolati come 
-           differenza tra l'inizio del segmento corrente e la fine del precedente.
+            differenza tra l'inizio del segmento corrente e la fine del precedente.
         5. EXPORT: Rendering finale in MP3 a 320kbps.
         """
         try:
             self.log(f"⏳ Analisi SRT e Traduzione AI ({src_lang} -> {tgt_lang})...")
+            
+            with open(srt_file, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+            
+            if not content or len(content) < 10:
+                self.log(f"❌ File SRT vuoto o troppo piccolo")
+                return False
+            
             segments_data = [] 
+            invalid_count = 0
             with open(srt_file, 'r', encoding='utf-8') as f:
                 content = f.read().strip().split('\n\n')
                 for i, block in enumerate(content):
                     lines = block.split('\n')
-                    if len(lines) < 3: continue
+                    if len(lines) < 3: 
+                        invalid_count += 1
+                        continue
+                    
                     time_line = lines[1]
+                    if ' --> ' not in time_line:
+                        invalid_count += 1
+                        continue
+                    
                     start_str, end_str = time_line.split(' --> ')
-                    segments_data.append({
-                        'id': i, 'text': " ".join(lines[2:]), 
-                        'start': self.srt_time_to_ms(start_str), 
-                        'limit': self.srt_time_to_ms(end_str) - self.srt_time_to_ms(start_str)
-                    })
+                    
+                    try:
+                        start_ms = self.srt_time_to_ms(start_str)
+                        end_ms = self.srt_time_to_ms(end_str)
+                        limit_ms = end_ms - start_ms
+                        
+                        if limit_ms <= 0:
+                            invalid_count += 1
+                            continue
+                        
+                        segments_data.append({
+                            'id': i, 'text': " ".join(lines[2:]), 
+                            'start': start_ms, 
+                            'limit': limit_ms
+                        })
+                    except ValueError as ve:
+                        self.log(f"⚠️ Segmento {i} timestamp invalido: {ve}")
+                        invalid_count += 1
 
+            if invalid_count > 0:
+                self.log(f"⚠️ {invalid_count} segmenti SRT ignorati (formato non valido)")
+            
             total_segments = len(segments_data)
+            if total_segments == 0:
+                self.log(f"❌ Nessun segmento SRT valido trovato")
+                return False
+            
             self.log(f"⚡ Generazione Audio Neurale in parallelo ({total_segments} segmenti)...")
             
-            # Limitiamo i worker per evitare di essere bloccati dai server Microsoft (Rate Limiting)
-            max_workers = min(os.cpu_count() * 2 if os.cpu_count() else 4, 12)
+            # Worker dinamico: CPU count * 2, limitato a 8 per rate-limit Edge-TTS
+            cpu_count = os.cpu_count() or 4
+            max_workers = min(cpu_count * 2, 8)
             
             results_map = {}
-            tts_tasks = [(s['id'], s['text'], s['start'], src_lang, tgt_lang) for s in segments_data]
+            tts_tasks = [(s['id'], s['text'], s['start'], src_lang, tgt_lang, gender) for s in segments_data]
             
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_idx = {executor.submit(self.translate_and_fetch_tts, task): task[0] for task in tts_tasks}
@@ -242,7 +348,7 @@ class VideoTranslatorLogic:
             self.log(f"❌ Errore generazione audio: {e}")
             return False
 
-    def merge_audio_video_mixed(self, video_path, translated_audio_path, output_video_path, vol_orig=0.4, vol_trans=1.0):
+    def merge_audio_video_mixed(self, video_path, translated_audio_path, output_video_path, vol_orig=0.4, vol_trans=1.0, embed_srt=False):
         """
         Mixer audio-video finale tramite FFmpeg Filter Complex.
 
@@ -256,17 +362,32 @@ class VideoTranslatorLogic:
         """
         try:
             self.log(f"🎬 Mixaggio finale (Orig: {vol_orig}, Trad: {vol_trans})...")
-            # Filter complex spiegazione: 
-            # [0:a]volume=X -> imposta volume audio originale
-            # [1:a]volume=Y -> imposta volume audio tradotto
-            # amix=inputs=2:duration=first -> mixa le due tracce basandosi sulla durata del primo file (il video)
+            
             filter_complex = f"[0:a]volume={vol_orig}[bg]; [1:a]volume={vol_trans}[fg]; [bg][fg]amix=inputs=2:duration=first[out]"
+            
             cmd = [
                 config.FFMPEG_BIN, '-y', '-i', video_path, '-i', translated_audio_path, 
                 '-filter_complex', filter_complex, '-map', '0:v:0', '-map', '[out]', 
                 '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', output_video_path
             ]
-            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW)
+            
+            if embed_srt:
+                srt_input = tempfile.NamedTemporaryFile(suffix='.srt', delete=False)
+                srt_path = srt_input.name
+                srt_input.close()
+                
+                with open(srt_file, 'w', encoding='utf-8') as srt_f:
+                    for seg in segments_data:
+                        start_time = datetime.fromtimestamp(seg['start'] / 1000)
+                        end_time = datetime.fromtimestamp((seg['start'] + seg['limit']) / 1000)
+                        srt_f.write(f"{seg['id']}\n")
+                        srt_f.write(f"{start_time.strftime('%H:%M:%S,%f')[:-3]} --> {end_time.strftime('%H:%M:%S,%f')[:-3]}\n")
+                        srt_f.write(f"{seg['text']}\n\n")
+                
+                cmd.extend(['-i', srt_path, '-c:s', 'mov_text', '-map', '2:s:0'])
+                os.remove(srt_path)
+            
+            self.ffmpeg_execute_with_retry(cmd)
             self.log(f"🚀 VIDEO FINALE PRONTO!")
         except Exception as e:
             self.log(f"❌ Errore mixaggio finale: {e}")

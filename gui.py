@@ -1,5 +1,5 @@
 import customtkinter as ctk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, dnd
 from datetime import datetime
 import threading
 import tempfile
@@ -41,6 +41,7 @@ class App(ctk.CTk):
         # ----------------------------------------------------------------------
         self.src_lang = ctk.StringVar(value="uk")      # Lingua sorgente predefinita: Ucraino
         self.tgt_lang = ctk.StringVar(value="it")      # Lingua target predefinita: Italiano
+        self.gender = ctk.StringVar(value="male")      # Selezione voce maschile/femminile
         self.output_mode = ctk.StringVar(value="video") # Modalità di export (video o solo audio)
         self.vol_orig = ctk.DoubleVar(value=0.4)       # Volume audio originale (background)
         self.vol_trans = ctk.DoubleVar(value=1.0)      # Volume audio tradotto (foreground)
@@ -96,6 +97,10 @@ class App(ctk.CTk):
         ctk.CTkLabel(self.lang_frame, text="➔").pack(side="left", padx=5)
         self.tgt_menu = ctk.CTkOptionMenu(self.lang_frame, values=langs, variable=self.tgt_lang, width=70)
         self.tgt_menu.pack(side="left", padx=5, pady=10)
+        
+        ctk.CTkLabel(self.lang_frame, text="Voce:", font=("Roboto", 12)).pack(side="left", padx=(20, 5))
+        self.gender_menu = ctk.CTkOptionMenu(self.lang_frame, values=["male", "female"], variable=self.gender, width=70)
+        self.gender_menu.pack(side="left", padx=5, pady=10)
         ctk.CTkButton(self.lang_frame, text="🚀 Download Video", width=120, fg_color="#0919ff", hover_color="#090b72", command=self.open_downloader).pack(side="left", padx=5, pady=10)
         ctk.CTkButton(self.lang_frame, text="⚙️ FFmpeg", width=80, command=self.set_ffmpeg).pack(side="left", padx=20)
 
@@ -158,16 +163,27 @@ class App(ctk.CTk):
         self.progress_frame.grid(row=7, column=0, padx=20, pady=(0, 10), sticky="ew")
         self.progress_frame.grid_columnconfigure(0, weight=1)
 
+        self.stage_labels = []
+        stages = ["Parsing SRT", "Traduzione", "TTS Neurale", "Stretching Audio", "Mixaggio"]
+        for i, stage in enumerate(stages):
+            lbl = ctk.CTkLabel(self.progress_frame, text=f"● {stage}", font=("Roboto", 11), text_color="gray")
+            lbl.grid(row=0, column=i, padx=5, pady=(15, 5))
+            self.stage_labels.append(lbl)
+
         self.progress_bar = ctk.CTkProgressBar(self.progress_frame)
-        self.progress_bar.grid(row=0, column=0, padx=20, pady=(15, 5), sticky="ew")
+        self.progress_bar.grid(row=1, column=0, columnspan=5, padx=20, pady=(5, 5), sticky="ew")
         self.progress_bar.set(0)
 
         self.progress_label = ctk.CTkLabel(self.progress_frame, text="Pronto per l'elaborazione neurale", font=("Roboto", 12))
-        self.progress_label.grid(row=1, column=0, padx=20, pady=(0, 15))
+        self.progress_label.grid(row=2, column=0, columnspan=5, padx=20, pady=(0, 15))
+
+        self.current_stage = ctk.StringVar(value="idle")
 
         # Log Console (Output testuale)
         self.log_text = ctk.CTkTextbox(self, font=("Consolas", 12))
         self.log_text.grid(row=8, column=0, padx=20, pady=(0, 20), sticky="nsew")
+
+        self.bind_dnd()
 
     # ----------------------------------------------------------------------
     # METODI DI SUPPORTO GUI
@@ -194,6 +210,52 @@ class App(ctk.CTk):
     def _set_progress(self, value, text):
         self.progress_bar.set(value)
         self.progress_label.configure(text=text)
+        
+        stage_map = {
+            "idle": -1,
+            "parsing": 0,
+            "translation": 1,
+            "tts": 2,
+            "stretching": 3,
+            "mixing": 4
+        }
+        stage_idx = stage_map.get(self.current_stage.get(), -1)
+        for i, lbl in enumerate(self.stage_labels):
+            if i == stage_idx:
+                lbl.configure(text_color="#3b8ed0")
+            else:
+                lbl.configure(text_color="gray")
+
+    def drop_file(self, event):
+        """Gestisce drag-and-drop di file, routing automatico per estensione."""
+        try:
+            files = event.data
+            if isinstance(files, str):
+                files = files.split()
+            for f in files:
+                if os.path.isfile(f):
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext == ".srt":
+                        self.entry_srt.delete(0, "end")
+                        self.entry_srt.insert(0, f)
+                    elif ext in (".mp4", ".avi", ".mkv", ".webm"):
+                        self.entry_vid.delete(0, "end")
+                        self.entry_vid.insert(0, f)
+                    else:
+                        self.entry_out.delete(0, "end")
+                        self.entry_out.insert(0, f)
+                    self.update_log(f"📥 File drag-and-drop: {f}")
+                    break
+        except Exception as e:
+            self.update_log(f"❌ Drag-and-drop error: {e}")
+
+    def bind_dnd(self):
+        """Inizializza drag-and-drop support."""
+        try:
+            self.event_add("<DND>", "<Drop>")
+            self.bind("<DND>", lambda e: self.drop_file(e))
+        except Exception:
+            pass
 
     def browse_file(self, entry, ext):
         """Apre una finestra di dialogo per selezionare un file."""
@@ -270,6 +332,7 @@ class App(ctk.CTk):
         out = self.entry_out.get().strip()
         src = self.src_lang.get()
         tgt = self.tgt_lang.get()
+        gender = self.gender.get()
         mode = self.output_mode.get()
 
         # Validazione minima input
@@ -294,9 +357,13 @@ class App(ctk.CTk):
                 f_sync = self.force_sync.get()
                 m_speed = self.max_speed_val.get()
 
-                # 1. Generazione audio tradotto e sincronizzato
-                if self.logic.generate_synced_audio(srt, audio_tmp, src_lang=src, tgt_lang=tgt, force_sync=f_sync, max_speed=m_speed):
+                self.current_stage.set("parsing")
+                self.update_progress(0.1, "Parsing SRT...")
+                
+                if self.logic.generate_synced_audio(srt, audio_tmp, src_lang=src, tgt_lang=tgt, gender=gender, force_sync=f_sync, max_speed=m_speed):
                     if mode == "video":
+                        self.current_stage.set("mixing")
+                        self.update_progress(0.9, "Mixaggio video...")
                         # 2. Mixaggio con video originale se richiesto
                         v_orig = self.vol_orig.get()
                         v_trans = self.vol_trans.get()
@@ -315,6 +382,7 @@ class App(ctk.CTk):
                 # Pulizia file temporaneo audio finale
                 if os.path.exists(audio_tmp): 
                     os.remove(audio_tmp)
+                self.current_stage.set("idle")
                 self.progress_bar.set(0)
                 self.progress_label.configure(text="Pronto per l'elaborazione neurale")
                 self.btn_start.configure(state="normal", text="AVVIA PRODUZIONE NEURALE")
