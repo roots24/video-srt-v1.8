@@ -348,7 +348,7 @@ class VideoTranslatorLogic:
             self.log(f"❌ Errore generazione audio: {e}")
             return False
 
-    def merge_audio_video_mixed(self, video_path, translated_audio_path, output_video_path, vol_orig=0.4, vol_trans=1.0, embed_srt=False):
+    def merge_audio_video_mixed(self, video_path, translated_audio_path, output_video_path, vol_orig=0.4, vol_trans=1.0, embed_srt=False, segments_data=None):
         """
         Mixer audio-video finale tramite FFmpeg Filter Complex.
 
@@ -371,12 +371,12 @@ class VideoTranslatorLogic:
                 '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', output_video_path
             ]
             
-            if embed_srt:
+            if embed_srt and segments_data is not None:
                 srt_input = tempfile.NamedTemporaryFile(suffix='.srt', delete=False)
                 srt_path = srt_input.name
                 srt_input.close()
                 
-                with open(srt_file, 'w', encoding='utf-8') as srt_f:
+                with open(srt_path, 'w', encoding='utf-8') as srt_f:
                     for seg in segments_data:
                         start_time = datetime.fromtimestamp(seg['start'] / 1000)
                         end_time = datetime.fromtimestamp((seg['start'] + seg['limit']) / 1000)
@@ -391,3 +391,4 @@ class VideoTranslatorLogic:
             self.log(f"🚀 VIDEO FINALE PRONTO!")
         except Exception as e:
             self.log(f"❌ Errore mixaggio finale: {e}")
+            return False
