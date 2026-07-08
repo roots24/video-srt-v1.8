@@ -3143,28 +3143,22 @@ specified readrate, then this rate takes effect till the input catches up with t
 specified readrate. Must not be lower than the primary readrate.
 </p>
 </dd>
-<dt><samp class="option">-vsync <var class="var">parameter</var> (<em class="emph">global</em>)</samp></dt>
 <dt><samp class="option">-fps_mode[:<var class="var">stream_specifier</var>] <var class="var">parameter</var> (<em class="emph">output,per-stream</em>)</samp></dt>
-<dd><p>Set video sync method / framerate mode. vsync is applied to all output video streams
-but can be overridden for a stream by setting fps_mode. vsync is deprecated and will be
-removed in the future.
-</p>
-<p>For compatibility reasons some of the values for vsync can be specified as numbers (shown
-in parentheses in the following table).
+<dd><p>Set video sync method / framerate mode.
 </p>
 <dl class="table">
-<dt><samp class="option">passthrough (0)</samp></dt>
+<dt><samp class="option">passthrough</samp></dt>
 <dd><p>Each frame is passed with its timestamp from the demuxer to the muxer.
 </p></dd>
-<dt><samp class="option">cfr (1)</samp></dt>
+<dt><samp class="option">cfr</samp></dt>
 <dd><p>Frames will be duplicated and dropped to achieve exactly the requested
 constant frame rate.
 </p></dd>
-<dt><samp class="option">vfr (2)</samp></dt>
+<dt><samp class="option">vfr</samp></dt>
 <dd><p>Frames are passed through with their timestamp or dropped so as to
 prevent 2 frames from having the same timestamp.
 </p></dd>
-<dt><samp class="option">auto (-1)</samp></dt>
+<dt><samp class="option">auto</samp></dt>
 <dd><p>Chooses between cfr and vfr depending on muxer capabilities. This is the
 default method.
 </p></dd>
@@ -3198,7 +3192,7 @@ Argument is a string of filter parameters composed the same as with the <code cl
 to sanitize them. In particular, do not remove the initial start time
 offset value.
 </p>
-<p>Note that, depending on the <samp class="option">vsync</samp> option or on specific muxer
+<p>Note that, depending on the <samp class="option">fps_mode</samp> option or on specific muxer
 processing (e.g. in case the format option <samp class="option">avoid_negative_ts</samp>
 is enabled) the output timestamps may mismatch with the input
 timestamps even when this option is selected.
