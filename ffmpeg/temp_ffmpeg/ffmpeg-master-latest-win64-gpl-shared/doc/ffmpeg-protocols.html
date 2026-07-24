@@ -602,9 +602,7 @@ string describing the libavformat build. (&quot;Lavf/&lt;version&gt;&quot;)
 </p>
 </dd>
 <dt><samp class="option">multiple_requests</samp></dt>
-<dd><p>Force persistent connections if set to 1, or disable if 0. Default is -1,
-which means auto (implies keep-alive when using -request_size or
--initial_request_size).
+<dd><p>Use persistent connections if set to 1, default is 0.
 </p>
 </dd>
 <dt><samp class="option">request_size</samp></dt>
@@ -612,7 +610,8 @@ which means auto (implies keep-alive when using -request_size or
 that throttle unbounded range requests, as well as when expecting to seek
 frequently. Disabled (set to 0) by default.
 </p>
-<p>Note that if enabling this option, it&rsquo;s strongly recommended to also set
+<p>Note that if enabling this option, it&rsquo;s strongly recommended to also enable
+the <samp class="option">multiple_requests</samp> option, as well as setting
 <samp class="option">short_seek_size</samp> to the same value or higher. Doing so allows FFmpeg
 to reuse a single HTTP connection wherever possible.
 </p>
@@ -1918,19 +1917,13 @@ and cache the same block at the same time. If this timeout elapses, it&rsquo;s
 assumed that the other process may have gotten stuck or died in the meantime.
 </p>
 <p>If set to zero, no waiting is done and all processes will immediately race
-to try and fetch the same missing blocks themselves. Defaults to 10000 (10 ms).
+to try and fetch the same missing blocks themselves. Defaults to 0.
 </p>
 </dd>
 <dt><samp class="option">retry_errors</samp></dt>
 <dd><p>If true (the default), transient read errors from the underlying input stream
 are ignored and retried again. If false, any blocks that previously failed
 being read from will be treated as permanently inaccessible.
-</p>
-</dd>
-<dt><samp class="option">retry_corrupt</samp></dt>
-<dd><p>If true (the default), blocks whose contents fail the CRC integrity check are
-re-fetched from the underlying input stream, overwriting the corrupt cached
-data. If false, cache corruption is treated as a fatal read error.
 </p>
 </dd>
 </dl>
@@ -2455,8 +2448,8 @@ database, but it does not validate that the certificate actually
 matches the host name we are trying to connect to. (With other backends,
 the host name is validated as well.)
 </p>
-<p>This is enabled by default. Verifying the peer requires a CA database,
-which in some cases has to be provided by the caller.
+<p>This is disabled by default since it requires a CA database to be
+provided by the caller in many cases.
 </p>
 </dd>
 <dt><samp class="option">cert_file, cert=<var class="var">filename</var></samp></dt>
@@ -2533,8 +2526,8 @@ peer certificate is signed by one of the root certificates in the CA
 database, but it does not validate that the certificate actually
 matches the host name we are trying to connect to.
 </p>
-<p>This is enabled by default. Verifying the peer requires a CA database,
-which in some cases has to be provided by the caller.
+<p>This is disabled by default since it requires a CA database to be
+provided by the caller in many cases.
 </p>
 </dd>
 <dt><samp class="option">cert_file, cert=<var class="var">filename</var></samp></dt>
