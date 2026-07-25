@@ -3,6 +3,7 @@ import asyncio
 import time
 import subprocess
 import tempfile
+import threading
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -32,6 +33,7 @@ class VideoTranslatorLogic:
         self.log = log_callback
         self.update_progress = progress_callback
         self._cache = {}
+        self._cache_lock = threading.Lock()
 
     def execute_with_retry(self, func, *args, max_retries=3, initial_delay=2, **kwargs):
         """
@@ -138,8 +140,9 @@ class VideoTranslatorLogic:
         import edge_tts # Import locale per evitare conflitti di asyncio all'avvio
         
         cache_key = f"{text}_{lang_code}_{gender}"
-        if cache_key in self._cache:
-            return self._cache[cache_key]
+        with self._cache_lock:
+            if cache_key in self._cache:
+                return self._cache[cache_key]
         
         voice_map = config.VOICE_MAP.get(lang_code)
         if not voice_map:
@@ -153,7 +156,8 @@ class VideoTranslatorLogic:
         
         audio = AudioSegment.from_file(temp_path)
         os.remove(temp_path)
-        self._cache[cache_key] = audio
+        with self._cache_lock:
+            self._cache[cache_key] = audio
         return audio
 
     def translate_and_fetch_tts(self, data):
@@ -164,8 +168,11 @@ class VideoTranslatorLogic:
         idx, text, start_ms, src_lang, tgt_lang, gender = data
         
         cache_key = f"{text}_{src_lang}_{tgt_lang}"
-        if cache_key in self._cache:
-            translated_text = self._cache[cache_key]
+        # Lettura thread-safe dalla cache
+        with self._cache_lock:
+            cached = self._cache.get(cache_key)
+        if cached is not None:
+            translated_text = cached
         else:
             try:
                 # 1. Traduzione tramite Google Translator
@@ -175,7 +182,9 @@ class VideoTranslatorLogic:
                     return text
 
                 translated_text = self.execute_with_retry(do_translate)
-                self._cache[cache_key] = translated_text
+                # Scrittura thread-safe nella cache
+                with self._cache_lock:
+                    self._cache[cache_key] = translated_text
             except Exception as e:
                 self.log(f"❌ Errore traduzione segmento {idx}: {e}")
                 return idx, None, start_ms
