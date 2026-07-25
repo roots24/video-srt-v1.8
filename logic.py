@@ -349,6 +349,7 @@ class VideoTranslatorLogic:
             
             self.ffmpeg_execute_with_retry(cmd)
             self.log(f"🚀 VIDEO FINALE PRONTO!")
+            return True
         except Exception as e:
             self.log(f"❌ Errore mixaggio finale: {e}")
             return False
