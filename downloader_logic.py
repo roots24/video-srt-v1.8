@@ -1,8 +1,6 @@
 import yt_dlp
 import os
 import re
-import threading
-from tkinter import messagebox
 import config
 
 def is_valid_url(url):
