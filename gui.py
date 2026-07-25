@@ -191,12 +191,11 @@ class App(ctk.CTk):
     def update_log(self, message):
         """
         Aggiunge un messaggio al log con timestamp.
-        Nota: Questo metodo viene chiamato sia dal thread principale che dai thread di lavoro.
-        CustomTkinter gestisce l'inserimento in modo relativamente sicuro, ma per 
-        operazioni più complesse si dovrebbe usare self.after().
+        Thread-safe: usa self.after per schedulare l'aggiornamento sul main thread.
         """
-        self.log_text.insert("end", f"[{datetime.now().strftime('%H:%M:%S')}] {message}\n")
-        self.log_text.see("end")
+        ts = f"[{datetime.now().strftime('%H:%M:%S')}] {message}\n"
+        self.after(0, lambda: self.log_text.insert("end", ts))
+        self.after(0, lambda: self.log_text.see("end"))
 
     def update_progress(self, value, text):
         """
