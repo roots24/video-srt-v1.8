@@ -66,7 +66,7 @@ def save_ffmpeg_path(path):
 
 def get_ffmpeg_install_dir():
     """Recupera la directory di installazione preferita per FFmpeg."""
-    settings_file = "ffmpeg_settings.txt"
+    settings_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ffmpeg_settings.txt")
     if os.path.exists(settings_file):
         with open(settings_file, 'r') as f:
             path = f.read().strip()
@@ -77,7 +77,8 @@ def get_ffmpeg_install_dir():
 
 def save_ffmpeg_install_dir(path):
     """Salva la directory di installazione preferita per FFmpeg."""
-    with open("ffmpeg_settings.txt", "w") as f:
+    settings_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ffmpeg_settings.txt")
+    with open(settings_file, "w") as f:
         f.write(path)
 
 def check_and_update_ffmpeg(custom_install_dir=None):
