@@ -124,46 +124,6 @@ class VideoTranslatorLogic:
             if os.path.exists(temp_out): os.remove(temp_out)
 
         return stretched_audio
-        current_duration_ms = len(audio_segment)
-        if current_duration_ms <= target_duration_ms:
-            return audio_segment
-
-        # Calcolo del fattore di accelerazione necessario
-        speed_factor = current_duration_ms / target_duration_ms
-        
-        if speed_factor > 1.3:
-            self.log(f"⚠️ Attenzione: Segmento molto compresso ({speed_factor:.2f}x). Potrebbe risultare innaturale.")
-
-        if not force_sync:
-            # Se non è forzata la sincronizzazione, limitiamo l'accelerazione per mantenere la qualità
-            if speed_factor > max_speed:
-                self.log(f"⚠️ Segmento troppo lungo ({speed_factor:.2f}x). Limitando a {max_speed:.2f}x per qualità.")
-                speed_factor = max_speed
-        else:
-            self.log(f"⚡ Sincronizzazione Forzata: applicando velocità esatta {speed_factor:.2f}x")
-
-        # FFmpeg richiede file fisici, usiamo file temporanei per l'elaborazione
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf_in:
-            temp_in = tf_in.name
-            audio_segment.export(temp_in, format="mp3")
-
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf_out:
-            temp_out = tf_out.name
-
-        try:
-            # Comando FFmpeg per cambiare velocità senza alterare il pitch
-            cmd = [config.FFMPEG_BIN, '-y', '-i', temp_in, '-filter:a', f"atempo={speed_factor}", temp_out]
-            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
-            stretched_audio = AudioSegment.from_file(temp_out)
-        except subprocess.CalledProcessError as e:
-            self.log(f"❌ Errore FFmpeg durante stretch audio: {e}")
-            return audio_segment
-        finally:
-            # Pulizia dei file temporanei per non intasare il disco
-            if os.path.exists(temp_in): os.remove(temp_in)
-            if os.path.exists(temp_out): os.remove(temp_out)
-
-        return stretched_audio
 
     async def _async_tts_generate(self, text, lang_code, gender="male"):
         """
