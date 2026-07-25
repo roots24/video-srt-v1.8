@@ -367,16 +367,16 @@ class App(ctk.CTk):
                         v_orig = self.vol_orig.get()
                         v_trans = self.vol_trans.get()
                         self.logic.merge_audio_video_mixed(vid, audio_tmp, out, vol_orig=v_orig, vol_trans=v_trans)
-                        messagebox.showinfo("Successo", f"Video Tradotto con Voci Neurali ({src} -> {tgt})!")
+                        self.after(0, lambda: messagebox.showinfo("Successo", f"Video Tradotto con Voci Neurali ({src} -> {tgt})!"))
                     else:
                         # Esporta solo l'audio finale
                         shutil.copy(audio_tmp, out)
-                        messagebox.showinfo("Successo", f"Audio Neurale esportato correttamente!")
+                        self.after(0, lambda: messagebox.showinfo("Successo", f"Audio Neurale esportato correttamente!"))
                 else:
-                    messagebox.showerror("Errore", "Si è verificato un errore critico durante la generazione dell'audio neurale.")
+                    self.after(0, lambda: messagebox.showerror("Errore", "Si è verificato un errore critico durante la generazione dell'audio neurale."))
             except Exception as e:
                 self.update_log(f"❌ Errore imprevisto nel task: {e}")
-                messagebox.showerror("Errore", f"Errore imprevisto: {e}")
+                self.after(0, lambda err_msg=str(e): messagebox.showerror("Errore", f"Errore imprevisto: {err_msg}"))
             finally:
                 # Pulizia file temporaneo audio finale
                 if os.path.exists(audio_tmp): 
