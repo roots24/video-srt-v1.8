@@ -87,8 +87,8 @@ def check_and_update_ffmpeg(custom_install_dir=None):
     
     LOGICA TECNICA:
     1. Verifica se `ffmpeg.exe` esiste nel percorso configurato.
-    2. Se esiste, esegue `ffmpeg -version` e controlla se l'output contiene "2024" 
-       (metodo semplificato per identificare versioni obsolete).
+    2. Se esiste, esegue `ffmpeg -version` e estrae il major version
+       (es. "7" da "ffmpeg version 7.0.2") per identificare versioni obsolete (< 7).
     3. In caso di assenza o obsolescenza:
        - Scarica l'ultima release build win64-gpl-shared da GitHub.
        - Estrae il file ZIP in una cartella temporanea `temp_ffmpeg`.
