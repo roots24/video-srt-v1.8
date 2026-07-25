@@ -77,11 +77,11 @@ Desktop.ini
 .DS_Store
 
 # ffmpeg binaries and temp files
-ffempeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/bin/
-ffempeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/lib/
-ffempeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/include/
-ffempeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/doc/
-ffempeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/presets/
+ffmpeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/bin/
+ffmpeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/lib/
+ffmpeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/include/
+ffmpeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/doc/
+ffmpeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/presets/
 *.mp4
 *.mkv
 *.webm
@@ -95,3 +95,7 @@ ffempeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/presets/
 *.log
 *.part
 *.crdownload
+
+# Impostazioni utente
+lmstudio_settings.txt
+ffmpeg_settings.txt
