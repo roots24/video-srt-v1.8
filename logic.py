@@ -105,11 +105,11 @@ class VideoTranslatorLogic:
         else:
             self.log(f"⚡ Sincronizzazione Forzata: applicando velocità esatta {speed_factor:.2f}x")
 
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf_in:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf_in:
             temp_in = tf_in.name
-            audio_segment.export(temp_in, format="mp3")
+            audio_segment.export(temp_in, format="wav")
 
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf_out:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf_out:
             temp_out = tf_out.name
 
         try:
