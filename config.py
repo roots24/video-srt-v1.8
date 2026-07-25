@@ -102,8 +102,9 @@ def check_and_update_ffmpeg(custom_install_dir=None):
         is_old = False
         if exists:
             res = subprocess.run([local_ffmpeg_exe, '-version'], capture_output=True, text=True)
-            version_match = re.search(r'20\d{2}', res.stdout)
-            if not version_match or int(version_match.group()) < 2024:
+            # Check semantico: estrae il major version dalla stringa "ffmpeg version X.Y.Z"
+            version_match = re.search(r'ffmpeg version (\d+)\.', res.stdout)
+            if not version_match or int(version_match.group(1)) < 7:
                 is_old = True
 
         if not exists or is_old:
