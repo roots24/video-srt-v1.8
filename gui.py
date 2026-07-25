@@ -312,7 +312,7 @@ class App(ctk.CTk):
 
                 threading.Thread(target=run_download, daemon=True).start()
 
-        ctk.CTkButton(settings_win, text="Scegli Esguibile (.exe)", command=select_exe).pack(pady=10)
+        ctk.CTkButton(settings_win, text="Scegli Eseguibile (.exe)", command=select_exe).pack(pady=10)
         ctk.CTkButton(settings_win, text="Scarica e Installa in Cartella", command=download_and_install).pack(pady=10)
 
     def start_production(self):
