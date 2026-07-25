@@ -82,10 +82,10 @@ def run_download_process(url, job_row, category, fmt_choice, save_path, browser_
             ydl_opts['postprocessors'] = [conf['post']]
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            # Aggiornamento nome file tramite callback della riga
-            job_row.after(0, lambda: setattr(job_row.lbl_name, 'text', info.get('title', 'Video')[:40] + "..."))
-            ydl.download([url])
+            info = ydl.extract_info(url, download=True)
+            # Aggiornamento nome file dal risultato dell'estrazione
+            title = info.get('title') or (info.get('entries') and info['entries'][0].get('title')) or 'Video'
+            job_row.after(0, lambda t=title: setattr(job_row.lbl_name, 'text', t[:40] + "..."))
 
         job_row.set_final_status("✅ Completato", "green")
     except Exception as e:
