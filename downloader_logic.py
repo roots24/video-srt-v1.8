@@ -37,7 +37,9 @@ def run_download_process(url, job_row, category, fmt_choice, save_path, browser_
         if not os.path.exists(save_path): 
             os.makedirs(save_path)
             
-        outtmpl = os.path.join(save_path, '%(playlist_title)s/%(playlist_index)s - %(title)s.%(ext)s') if 'playlist' in url else os.path.join(save_path, '%(title)s.%(ext)s')
+        # Rilevamento playlist tramite pattern URL comuni (YouTube, Vimeo, ecc.)
+        is_playlist = bool(re.search(r'(?:youtube\.com|youtu\.be)/playlist|list=|p=[A-Z]|/playlist/', url, re.I))
+        outtmpl = os.path.join(save_path, '%(playlist_title)s/%(playlist_index)s - %(title)s.%(ext)s') if is_playlist else os.path.join(save_path, '%(title)s.%(ext)s')
 
         def progress_hook(d):
             """
@@ -53,7 +55,7 @@ def run_download_process(url, job_row, category, fmt_choice, save_path, browser_
                 job_row.start_merge_animation()
 
         ydl_opts = {
-            'nocheckcertificate': True, 
+            # 'nocheckcertificate': True,  # RIMOSSO: disabilitare SSL è un rischio MITM
             'quiet': True, 
             'no_warnings': True,
             'cookies_from_browser': browser_choice, 
