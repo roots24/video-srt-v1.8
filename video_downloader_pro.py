@@ -205,9 +205,9 @@ class YoutubeDownloaderGUI(ctk.CTkToplevel):
         """Verifica l'aggiornamento di FFmpeg all'avvio senza mostrare alert se già aggiornato."""
         success, message = config.check_and_update_ffmpeg()
         if success:
-            self.after(0, lambda: messagebox.showinfo("FFmpeg", message))
+            messagebox.showinfo("FFmpeg", message)
         elif "già aggiornato" not in message:
-            self.after(0, lambda: messagebox.showerror("Errore", message))
+            messagebox.showerror("Errore", message)
 
     def check_and_update_ffmpeg(self):
         """Wrapper per il pulsante della GUI che richiama la logica unificata."""

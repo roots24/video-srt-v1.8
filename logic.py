@@ -1,9 +1,13 @@
 import os
 import asyncio
 import time
+import json
+import pickle
+import hashlib
+import re
 import subprocess
 import tempfile
-import threading
+import shutil
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -33,32 +37,158 @@ class VideoTranslatorLogic:
         self.log = log_callback
         self.update_progress = progress_callback
         self._cache = {}
-        self._cache_lock = threading.Lock()
+        self._tts_memory_cache = {}
+        self._persistent_cache_dir = config.CACHE_DIR
+        
+        if not hasattr(self, '_load_persistent_cache'):
+            self._load_persistent_cache()
 
-    def execute_with_retry(self, func, *args, max_retries=3, initial_delay=2, **kwargs):
-        """
-        Implementa un meccanismo di resilienza tramite Exponential Backoff.
+    def _get_cache_key(self, text, lang_code=None, gender="male"):
+        """Genera un hash SHA256 univoco per il cache."""
+        key_str = f"{text}_{lang_code}_{gender}"
+        return hashlib.sha256(key_str.encode()).hexdigest()[:16]
 
-        LOGICA TECNICA:
-        In caso di eccezione (tipicamente errori HTTP 429 Too Many Requests), il sistema
-        attende un intervallo che raddoppia ad ogni tentativo (2s, 4s, 8s...).
-        Questo approccio è fondamentale per interagire con API gratuite (Google Translate, Edge-TTS)
-        evitando il ban temporaneo dell'indirizzo IP.
+    def _load_persistent_cache(self):
+        """Carica la cache persistente da disco all'avvio."""
+        if not config.PERSISTENT_CACHE_ENABLED:
+            self.log("ℹ️ Cache persistente disabilitata")
+            return
+        
+        try:
+            cache_file = os.path.join(self._persistent_cache_dir, 'translation_cache.json')
+            if os.path.exists(cache_file):
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    loaded_cache = json.load(f)
+                    self._cache.update(loaded_cache)
+                    self.log(f"✅ Cache caricata: {len(loaded_cache)} elementi")
+        except Exception as e:
+            self.log(f"⚠️ Errore carica cache: {e}")
+
+    def _save_persistent_cache(self):
+        """Salva la cache su disco per persistenza."""
+        if not config.PERSISTENT_CACHE_ENABLED:
+            return
+        
+        try:
+            cache_file = os.path.join(self._persistent_cache_dir, 'translation_cache.json')
+            
+            # Controllo dimensione cache
+            self._enforce_cache_limit()
+            
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(self._cache, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.log(f"⚠️ Errore salva cache: {e}")
+
+    def _enforce_cache_limit(self):
+        """Mantieni la cache entro i limiti di dimensione."""
+        try:
+            cache_file = os.path.join(self._persistent_cache_dir, 'translation_cache.json')
+            if not os.path.exists(cache_file):
+                return
+            
+            file_size_mb = os.path.getsize(cache_file) / (1024 * 1024)
+            if file_size_mb > config.MAX_CACHE_SIZE_MB:
+                self.log(f"📊 Cache troppo grande ({file_size_mb:.1f}MB), riduzione...")
+                # Riduco la cache mantenendo solo il 50% degli elementi più recenti
+                sorted_items = sorted(self._cache.items(), key=lambda x: x[1].get('_timestamp', 0), reverse=True)
+                half_size = len(sorted_items) // 2
+                self._cache = {k: v for k, v in sorted_items[:half_size]}
+        except Exception as e:
+            self.log(f"⚠️ Errore controllo dimensione cache: {e}")
+
+    def _get_cached_translation(self, text, src_lang, tgt_lang):
+        """Recupera traduzione dal cache."""
+        if not config.PERSISTENT_CACHE_ENABLED:
+            return None
+        
+        cache_key = f"{text}_{src_lang}_{tgt_lang}"
+        if cache_key in self._cache:
+            entry = self._cache[cache_key]
+            # Aggiorna timestamp accesso
+            entry['_timestamp'] = time.time()
+            return entry.get('translated_text')
+        
+        return None
+
+    def _set_cached_translation(self, text, src_lang, tgt_lang, translated_text):
+        """Salva traduzione nel cache."""
+        if not config.PERSISTENT_CACHE_ENABLED:
+            return
+        
+        cache_key = f"{text}_{src_lang}_{tgt_lang}"
+        self._cache[cache_key] = {
+            'translated_text': translated_text,
+            '_timestamp': time.time()
+        }
+        
+        # Salva su disco ogni 50 nuove voci per performance
+        if len(self._cache) % 50 == 0:
+            self._save_persistent_cache()
+
+    def _get_cached_tts(self, text, lang_code, gender):
+        """Recupera TTS dal cache (file audio)."""
+        if not config.PERSISTENT_CACHE_ENABLED:
+            return None
+        
+        cache_key = self._get_cache_key(text, lang_code, gender)
+        audio_file = os.path.join(self._persistent_cache_dir, f'tts_{cache_key}.pkl')
+        
+        if os.path.exists(audio_file):
+            try:
+                with open(audio_file, 'rb') as f:
+                    return pickle.load(f)
+            except Exception:
+                return None
+        return None
+
+    def _set_cached_tts(self, text, lang_code, gender, audio_segment):
+        """Salva TTS nel cache (file audio)."""
+        if not config.PERSISTENT_CACHE_ENABLED:
+            return
+        
+        cache_key = self._get_cache_key(text, lang_code, gender)
+        audio_file = os.path.join(self._persistent_cache_dir, f'tts_{cache_key}.pkl')
+        
+        try:
+            with open(audio_file, 'wb') as f:
+                pickle.dump(audio_segment, f)
+        except Exception as e:
+            self.log(f"⚠️ Errore salva TTS cache: {e}")
+
+    def execute_with_retry(self, func, *args, timeout=None, max_retries=3, initial_delay=2, **kwargs):
         """
+        Implementa un meccanismo di resilienza tramite Exponential Backoff con timeout.
+
+        Aggiunge un timeout configurabile per evitare blocchi infiniti sulle API.
+        Utilizza ThreadPoolExecutor per eseguire la funzione con un timeout.
+        """
+        if timeout is None:
+            timeout = config.API_TIMEOUT
+
         last_exception = None
         for attempt in range(max_retries):
             try:
-                return func(*args, **kwargs)
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(lambda: func(*args, **kwargs))
+                    return future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError:
+                self.log(f"⏱️ Timeout API tentativo {attempt + 1}/{max_retries} ({timeout}s)")
+                last_exception = Exception(f"Timeout dopo {timeout}s")
             except Exception as e:
                 last_exception = e
-                # Calcolo del ritardo: 2s, 4s, 8s...
-                delay = initial_delay * (2 ** attempt) 
+                delay = initial_delay * (2 ** attempt)
                 self.log(f"⚠️ Tentativo {attempt + 1}/{max_retries} fallito. Riprovo tra {delay}s... ({e})")
                 time.sleep(delay)
         raise last_exception
 
-    def ffmpeg_execute_with_retry(self, cmd, max_retries=3, initial_delay=2):
+    def ffmpeg_execute_with_retry(self, cmd, max_retries=None, initial_delay=None):
         """Retry logic per comandi FFmpeg (stretching/mixing)."""
+        if max_retries is None:
+            max_retries = config.FFMPEG_MAX_RETRIES
+        if initial_delay is None:
+            initial_delay = config.FFMPEG_RETRY_DELAY
+
         last_exception = None
         for attempt in range(max_retries):
             try:
@@ -71,13 +201,46 @@ class VideoTranslatorLogic:
                 time.sleep(delay)
         raise last_exception
 
+    def check_disk_space(self, path, required_mb):
+        """Verifica spazio disco disponibile prima dell'elaborazione."""
+        try:
+            stat = shutil.disk_usage(path)
+            available_mb = stat.free / (1024 * 1024)
+            if available_mb < required_mb:
+                raise Exception(
+                    f"Spazio insufficiente: {available_mb:.1f}MB disponibili, "
+                    f"richiesti {required_mb:.1f}MB"
+                )
+            self.log(f"💾 Spazio disco OK: {available_mb:.1f}MB disponibili (richiesti {required_mb:.1f}MB)")
+            return True
+        except Exception as e:
+            self.log(f"❌ {e}")
+            return False
+
     def srt_time_to_ms(self, time_str):
         """
-        Converte una stringa di tempo in formato SRT (00:00:00,000) in millisecondi totali.
-        Utile per calcolare precise durate e posizionamenti audio tramite pydub.
+        Converte una stringa di tempo in millisecondi totali.
+        Gestisce formati SRT con virgola o punto come separatore dei decimali.
         """
-        t = datetime.strptime(time_str.strip(), "%H:%M:%S,%f")
-        return (t.hour * 3600000) + (t.minute * 60000) + (t.second * 1000) + (t.microsecond // 1000)
+        time_str = time_str.strip()
+        
+        if not time_str:
+            raise ValueError("Timestamp vuoto")
+        
+        try:
+            t = datetime.strptime(time_str, "%H:%M:%S,%f")
+            return (t.hour * 3600000) + (t.minute * 60000) + (t.second * 1000) + (t.microsecond // 1000)
+        except ValueError:
+            pass
+        
+        try:
+            time_str = time_str.replace('.', ',')
+            t = datetime.strptime(time_str, "%H:%M:%S,%f")
+            return (t.hour * 3600000) + (t.minute * 60000) + (t.second * 1000) + (t.microsecond // 1000)
+        except ValueError:
+            pass
+        
+        raise ValueError(f"Formato timestamp non valido: {time_str}")
 
     def stretch_audio(self, audio_segment, target_duration_ms, force_sync=False, max_speed=1.5):
         """
@@ -107,11 +270,11 @@ class VideoTranslatorLogic:
         else:
             self.log(f"⚡ Sincronizzazione Forzata: applicando velocità esatta {speed_factor:.2f}x")
 
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf_in:
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf_in:
             temp_in = tf_in.name
-            audio_segment.export(temp_in, format="wav")
+            audio_segment.export(temp_in, format="mp3")
 
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf_out:
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf_out:
             temp_out = tf_out.name
 
         try:
@@ -140,9 +303,16 @@ class VideoTranslatorLogic:
         import edge_tts # Import locale per evitare conflitti di asyncio all'avvio
         
         cache_key = f"{text}_{lang_code}_{gender}"
-        with self._cache_lock:
-            if cache_key in self._cache:
-                return self._cache[cache_key]
+        
+        # Controllo cache in memoria prima (cache TTS separata)
+        if cache_key in self._tts_memory_cache:
+            return self._tts_memory_cache[cache_key]
+        
+        # Controllo cache persistente (file audio)
+        cached_audio = self._get_cached_tts(text, lang_code, gender)
+        if cached_audio is not None:
+            self._tts_memory_cache[cache_key] = cached_audio
+            return cached_audio
         
         voice_map = config.VOICE_MAP.get(lang_code)
         if not voice_map:
@@ -156,9 +326,29 @@ class VideoTranslatorLogic:
         
         audio = AudioSegment.from_file(temp_path)
         os.remove(temp_path)
-        with self._cache_lock:
-            self._cache[cache_key] = audio
+        
+        # Salva in cache memoria TTS (separata dalla cache testuale) e su disco
+        self._tts_memory_cache[cache_key] = audio
+        self._set_cached_tts(text, lang_code, gender, audio)
+        
         return audio
+
+    def detect_language(self, text_sample=None):
+        """Rileva automaticamente la lingua di un testo campione."""
+        try:
+            from langdetect import detect, DetectorFactory, LangDetectException
+            DetectorFactory.seed = 0
+            if text_sample and len(text_sample.strip()) > 10:
+                lang = detect(text_sample[:500])
+                self.log(f"🌐 Lingua rilevata: {lang}")
+                return lang
+        except ImportError:
+            self.log("ℹ️ langdetect non installato. Installa con: pip install langdetect")
+        except LangDetectException:
+            self.log("⚠️ Impossibile rilevare la lingua automaticamente")
+        except Exception as e:
+            self.log(f"⚠️ Errore rilevamento lingua: {e}")
+        return None
 
     def translate_and_fetch_tts(self, data):
         """
@@ -167,12 +357,10 @@ class VideoTranslatorLogic:
         """
         idx, text, start_ms, src_lang, tgt_lang, gender = data
         
-        cache_key = f"{text}_{src_lang}_{tgt_lang}"
-        # Lettura thread-safe dalla cache
-        with self._cache_lock:
-            cached = self._cache.get(cache_key)
-        if cached is not None:
-            translated_text = cached
+        # Cache persistente: controlla prima se c'è la traduzione
+        cached_translation = self._get_cached_translation(text, src_lang, tgt_lang)
+        if cached_translation:
+            translated_text = cached_translation
         else:
             try:
                 # 1. Traduzione tramite Google Translator
@@ -182,12 +370,17 @@ class VideoTranslatorLogic:
                     return text
 
                 translated_text = self.execute_with_retry(do_translate)
-                # Scrittura thread-safe nella cache
-                with self._cache_lock:
-                    self._cache[cache_key] = translated_text
+                # Salva nella cache per uso futuro
+                self._set_cached_translation(text, src_lang, tgt_lang, translated_text)
             except Exception as e:
                 self.log(f"❌ Errore traduzione segmento {idx}: {e}")
                 return idx, None, start_ms
+        
+        # Cache TTS: controlla se l'audio è già stato generato
+        cache_key_tts = f"{text}_{tgt_lang}_{gender}"
+        cached_tts = self._get_cached_tts(text, tgt_lang, gender)
+        if cached_tts is not None:
+            return idx, cached_tts, start_ms
         
         try:
             # 2. Sintesi Vocale Neurale (Edge-TTS richiede asyncio per funzionare)
@@ -195,6 +388,10 @@ class VideoTranslatorLogic:
                 return asyncio.run(self._async_tts_generate(translated_text, tgt_lang, gender))
 
             phrase_audio = self.execute_with_retry(do_tts)
+            
+            # Salva TTS nella cache
+            self._set_cached_tts(text, tgt_lang, gender, phrase_audio)
+            
             return idx, phrase_audio, start_ms
         except Exception as e:
             self.log(f"❌ Errore critico segmento {idx}: {e}")
@@ -228,49 +425,73 @@ class VideoTranslatorLogic:
             with open(srt_file, 'r', encoding='utf-8') as f:
                 content = f.read().strip().split('\n\n')
                 for i, block in enumerate(content):
-                    lines = block.split('\n')
+                    lines = [line.strip() for line in block.split('\n') if line.strip()]
+                    
                     if len(lines) < 3: 
                         invalid_count += 1
                         continue
                     
-                    time_line = lines[1]
+                    time_line = lines[1] if len(lines) > 1 else ""
                     if ' --> ' not in time_line:
                         invalid_count += 1
+                        self.log(f"⚠️ Segmento {i}: formato timestamp mancante")
                         continue
                     
-                    start_str, end_str = time_line.split(' --> ')
-                    
                     try:
+                        parts = time_line.split(' --> ')
+                        start_str, end_str = parts[0].strip(), parts[1].strip()
+                        
                         start_ms = self.srt_time_to_ms(start_str)
                         end_ms = self.srt_time_to_ms(end_str)
                         limit_ms = end_ms - start_ms
                         
                         if limit_ms <= 0:
                             invalid_count += 1
+                            self.log(f"⚠️ Segmento {i}: durata non positiva ({limit_ms}ms)")
+                            continue
+                        
+                        if not start_str or not end_str:
+                            invalid_count += 1
+                            self.log(f"⚠️ Segmento {i}: timestamp vuoto")
+                            continue
+                        
+                        text_lines = lines[2:] if len(lines) > 2 else []
+                        text = " ".join(text_lines)
+                        
+                        if not text.strip():
+                            invalid_count += 1
+                            self.log(f"⚠️ Segmento {i}: testo vuoto")
                             continue
                         
                         segments_data.append({
-                            'id': i, 'text': " ".join(lines[2:]), 
+                            'id': i, 'text': text, 
                             'start': start_ms, 
                             'limit': limit_ms
                         })
                     except ValueError as ve:
-                        self.log(f"⚠️ Segmento {i} timestamp invalido: {ve}")
                         invalid_count += 1
+                        self.log(f"⚠️ Segmento {i} timestamp invalido: {ve}")
 
             if invalid_count > 0:
                 self.log(f"⚠️ {invalid_count} segmenti SRT ignorati (formato non valido)")
             
+            # Controllo spazio disco necessario
             total_segments = len(segments_data)
+            output_dir = os.path.dirname(output_file) or '.'
+            srt_size_mb = os.path.getsize(srt_file) / (1024 * 1024) if os.path.exists(srt_file) else 5
+            required_mb = int(srt_size_mb * 10 + total_segments * 0.5 + 200)
+            if not self.check_disk_space(output_dir, required_mb):
+                self.log("❌ Elaborazione annullata per spazio disco insufficiente")
+                return False
             if total_segments == 0:
                 self.log(f"❌ Nessun segmento SRT valido trovato")
                 return False
             
             self.log(f"⚡ Generazione Audio Neurale in parallelo ({total_segments} segmenti)...")
             
-            # Worker dinamico: CPU count * 2, limitato a 8 per rate-limit Edge-TTS
+            # Worker dinamico: CPU count * 2, aumentato a 16 per performance
             cpu_count = os.cpu_count() or 4
-            max_workers = min(cpu_count * 2, 8)
+            max_workers = min(cpu_count * 2, config.MAX_WORKERS)
             
             results_map = {}
             tts_tasks = [(s['id'], s['text'], s['start'], src_lang, tgt_lang, gender) for s in segments_data]
@@ -311,15 +532,31 @@ class VideoTranslatorLogic:
                 final_audio += segment
                 
             final_audio.export(output_file, format="mp3", bitrate="320k")
+            
+            # Salva cache su disco alla fine del processo
+            if config.PERSISTENT_CACHE_ENABLED:
+                self._save_persistent_cache()
+            
             self.log(f"✅ Traccia audio neurale creata con successo!")
             return True
         except Exception as e:
             self.log(f"❌ Errore generazione audio: {e}")
             return False
 
+    def get_video_duration(self, video_path):
+        """Recupera la durata del video in secondi usando ffprobe."""
+        try:
+            cmd = [config.FFMPEG_BIN.replace('ffmpeg', 'ffprobe'), '-v', 'error', '-show_entries',
+                   'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', video_path]
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    creationflags=subprocess.CREATE_NO_WINDOW)
+            return float(result.stdout.decode().strip())
+        except:
+            return None
+
     def merge_audio_video_mixed(self, video_path, translated_audio_path, output_video_path, vol_orig=0.4, vol_trans=1.0, embed_srt=False, segments_data=None):
         """
-        Mixer audio-video finale tramite FFmpeg Filter Complex.
+        Mixer audio-video finale tramite FFmpeg Filter Complex con progress bar.
 
         ANALISI TECNICA DEL FILTRO:
         Viene costruita una catena di filtri (`filter_complex`) che opera come segue:
@@ -331,7 +568,9 @@ class VideoTranslatorLogic:
         """
         try:
             self.log(f"🎬 Mixaggio finale (Orig: {vol_orig}, Trad: {vol_trans})...")
-            
+
+            total_duration = self.get_video_duration(video_path)
+
             filter_complex = f"[0:a]volume={vol_orig}[bg]; [1:a]volume={vol_trans}[fg]; [bg][fg]amix=inputs=2:duration=first[out]"
             
             cmd = [
@@ -341,10 +580,7 @@ class VideoTranslatorLogic:
             ]
             
             if embed_srt and segments_data is not None:
-                srt_input = tempfile.NamedTemporaryFile(suffix='.srt', delete=False)
-                srt_path = srt_input.name
-                srt_input.close()
-                
+                srt_path = os.path.join(tempfile.gettempdir(), f'embed_{os.path.basename(output_video_path)}.srt')
                 with open(srt_path, 'w', encoding='utf-8') as srt_f:
                     for seg in segments_data:
                         start_time = datetime.fromtimestamp(seg['start'] / 1000)
@@ -352,13 +588,113 @@ class VideoTranslatorLogic:
                         srt_f.write(f"{seg['id']}\n")
                         srt_f.write(f"{start_time.strftime('%H:%M:%S,%f')[:-3]} --> {end_time.strftime('%H:%M:%S,%f')[:-3]}\n")
                         srt_f.write(f"{seg['text']}\n\n")
-                
                 cmd.extend(['-i', srt_path, '-c:s', 'mov_text', '-map', '2:s:0'])
-                os.remove(srt_path)
-            
-            self.ffmpeg_execute_with_retry(cmd)
+
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                encoding='utf-8',
+                errors='replace',
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+
+            for line in process.stdout:
+                if total_duration and 'time=' in line:
+                    time_match = re.search(r'time=(\d+):(\d+):(\d+\.\d+)', line)
+                    if time_match:
+                        hours, mins, secs = map(float, time_match.groups())
+                        elapsed = (hours * 3600) + (mins * 60) + secs
+                        progress = min(elapsed / total_duration, 1.0)
+                        if self.update_progress:
+                            self.update_progress(0.9 + progress * 0.1, f"Mixaggio video... {int(progress*100)}%")
+
+            process.wait()
+
+            if embed_srt and segments_data is not None:
+                if os.path.exists(srt_path):
+                    os.remove(srt_path)
+
+            if process.returncode != 0:
+                raise subprocess.CalledProcessError(process.returncode, cmd)
+
             self.log(f"🚀 VIDEO FINALE PRONTO!")
-            return True
         except Exception as e:
             self.log(f"❌ Errore mixaggio finale: {e}")
             return False
+
+
+class BatchProcessor:
+    """Elabora piu file SRT in sequenza senza riavviare l'applicazione."""
+    def __init__(self, log_callback, progress_callback=None):
+        self.log = log_callback
+        self.update_progress = progress_callback
+        self.queue = []
+        self.is_running = False
+
+    def add_to_queue(self, srt_file, video_file, output_file, src_lang, tgt_lang, gender,
+                     force_sync, max_speed, vol_orig, vol_trans, output_mode, embed_srt):
+        self.queue.append({
+            'srt': srt_file, 'video': video_file, 'output': output_file,
+            'src': src_lang, 'tgt': tgt_lang, 'gender': gender,
+            'force_sync': force_sync, 'max_speed': max_speed,
+            'vol_orig': vol_orig, 'vol_trans': vol_trans,
+            'mode': output_mode, 'embed_srt': embed_srt
+        })
+
+    def remove_from_queue(self, index):
+        if 0 <= index < len(self.queue):
+            self.queue.pop(index)
+
+    def clear_queue(self):
+        self.queue.clear()
+
+    def process_all(self, logic_engine):
+        """Elabora tutti i file in coda sequenzialmente."""
+        self.is_running = True
+        total = len(self.queue)
+        success_count = 0
+
+        for i, item in enumerate(self.queue):
+            self.log(f"\n{'='*50}")
+            self.log(f"📦 Batch {i+1}/{total}: {os.path.basename(item['srt'])}")
+            self.log(f"{'='*50}")
+
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf:
+                    audio_tmp = tf.name
+
+                if logic_engine.generate_synced_audio(
+                    item['srt'], audio_tmp,
+                    src_lang=item['src'], tgt_lang=item['tgt'],
+                    gender=item['gender'], force_sync=item['force_sync'],
+                    max_speed=item['max_speed']
+                ):
+                    if item['mode'] == 'video' and item['video']:
+                        logic_engine.merge_audio_video_mixed(
+                            item['video'], audio_tmp, item['output'],
+                            vol_orig=item['vol_orig'], vol_trans=item['vol_trans'],
+                            embed_srt=item['embed_srt'],
+                            segments_data=None
+                        )
+                    else:
+                        shutil.copy(audio_tmp, item['output'])
+
+                    success_count += 1
+                    self.log(f"✅ Batch {i+1}/{total} completato con successo")
+                else:
+                    self.log(f"❌ Batch {i+1}/{total} fallito")
+
+                if os.path.exists(audio_tmp):
+                    os.remove(audio_tmp)
+
+            except Exception as e:
+                self.log(f"❌ Batch {i+1}/{total} errore: {e}")
+
+            if self.update_progress:
+                self.update_progress((i + 1) / total, f"Batch {i+1}/{total}")
+
+        self.log(f"\n{'='*50}")
+        self.log(f"📊 Batch completato: {success_count}/{total} successi")
+        self.is_running = False

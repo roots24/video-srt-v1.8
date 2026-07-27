@@ -76,12 +76,19 @@ Desktop.ini
 # macOS
 .DS_Store
 
-# ffmpeg binaries and temp files
-ffmpeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/bin/
-ffmpeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/lib/
-ffmpeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/include/
-ffmpeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/doc/
-ffmpeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/presets/
+# Directory persistente per FFmpeg (commentare se si vuole tracciare in git)
+ffmpeg_persistent/
+
+# Vecchia cartella ffmpeg (backup - rimuovere dopo verifica)
+ffmpeg_old/
+
+# Cartelle temporanee durante download FFmpeg
+ffmpeg_persistent/_temp_download/
+ffempeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/bin/
+ffempeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/lib/
+ffempeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/include/
+ffempeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/doc/
+ffempeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/presets/
 *.mp4
 *.mkv
 *.webm
@@ -95,7 +102,3 @@ ffmpeg/temp_ffmpeg/ffmpeg-master-latest-win64-gpl-shared/presets/
 *.log
 *.part
 *.crdownload
-
-# Impostazioni utente
-lmstudio_settings.txt
-ffmpeg_settings.txt

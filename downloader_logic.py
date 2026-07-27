@@ -1,6 +1,8 @@
 import yt_dlp
 import os
 import re
+import threading
+from tkinter import messagebox
 import config
 
 def is_valid_url(url):
@@ -35,9 +37,7 @@ def run_download_process(url, job_row, category, fmt_choice, save_path, browser_
         if not os.path.exists(save_path): 
             os.makedirs(save_path)
             
-        # Rilevamento playlist tramite pattern URL comuni (YouTube, Vimeo, ecc.)
-        is_playlist = bool(re.search(r'(?:youtube\.com|youtu\.be)/playlist|list=|p=[A-Z]|/playlist/', url, re.I))
-        outtmpl = os.path.join(save_path, '%(playlist_title)s/%(playlist_index)s - %(title)s.%(ext)s') if is_playlist else os.path.join(save_path, '%(title)s.%(ext)s')
+        outtmpl = os.path.join(save_path, '%(playlist_title)s/%(playlist_index)s - %(title)s.%(ext)s') if 'playlist' in url else os.path.join(save_path, '%(title)s.%(ext)s')
 
         def progress_hook(d):
             """
@@ -53,7 +53,7 @@ def run_download_process(url, job_row, category, fmt_choice, save_path, browser_
                 job_row.start_merge_animation()
 
         ydl_opts = {
-            # 'nocheckcertificate': True,  # RIMOSSO: disabilitare SSL è un rischio MITM
+            'nocheckcertificate': True, 
             'quiet': True, 
             'no_warnings': True,
             'cookies_from_browser': browser_choice, 
@@ -80,10 +80,10 @@ def run_download_process(url, job_row, category, fmt_choice, save_path, browser_
             ydl_opts['postprocessors'] = [conf['post']]
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            # Aggiornamento nome file dal risultato dell'estrazione
-            title = info.get('title') or (info.get('entries') and info['entries'][0].get('title')) or 'Video'
-            job_row.after(0, lambda t=title: setattr(job_row.lbl_name, 'text', t[:40] + "..."))
+            info = ydl.extract_info(url, download=False)
+            # Aggiornamento nome file tramite callback della riga
+            job_row.after(0, lambda: setattr(job_row.lbl_name, 'text', info.get('title', 'Video')[:40] + "..."))
+            ydl.download([url])
 
         job_row.set_final_status("✅ Completato", "green")
     except Exception as e:

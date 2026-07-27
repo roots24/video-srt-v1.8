@@ -33,9 +33,10 @@ def get_ffmpeg_path():
     """
     Risolve il percorso dell'eseguibile FFmpeg seguendo un ordine di priorità gerarchico:
     1. Directory personalizzata salvata dall'utente in `ffmpeg_settings.txt`.
-    2. Cartella `/bin/` locale nella root del progetto.
-    3. Cartella temporanea di PyInstaller (`_MEIPASS`), fondamentale per i file bundle .exe.
-    4. Fallback al comando 'ffmpeg', assumendo che sia presente nel PATH di sistema.
+    2. Cartella persistente nella root del progetto (`ffmpeg_persistent/`).
+    3. Cartella `/bin/` locale nella root del progetto.
+    4. Cartella temporanea di PyInstaller (`_MEIPASS`), fondamentale per i file bundle .exe.
+    5. Fallback al comando 'ffmpeg', assumendo che sia presente nel PATH di sistema.
     """
     # Prova a recuperare il percorso dall'install dir salvata nelle impostazioni
     install_dir = get_ffmpeg_install_dir()
@@ -66,19 +67,20 @@ def save_ffmpeg_path(path):
 
 def get_ffmpeg_install_dir():
     """Recupera la directory di installazione preferita per FFmpeg."""
-    settings_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ffmpeg_settings.txt")
+    settings_file = "ffmpeg_settings.txt"
     if os.path.exists(settings_file):
         with open(settings_file, 'r') as f:
             path = f.read().strip()
             if path and os.path.isdir(path):
                 return path
-    # Default: cartella dell'applicazione
-    return os.path.dirname(os.path.abspath(__file__))
+    # Default: cartella persistente nella root del progetto
+    default_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ffmpeg_persistent')
+    os.makedirs(default_dir, exist_ok=True)
+    return default_dir
 
 def save_ffmpeg_install_dir(path):
     """Salva la directory di installazione preferita per FFmpeg."""
-    settings_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ffmpeg_settings.txt")
-    with open(settings_file, "w") as f:
+    with open("ffmpeg_settings.txt", "w") as f:
         f.write(path)
 
 def check_and_update_ffmpeg(custom_install_dir=None):
@@ -87,8 +89,8 @@ def check_and_update_ffmpeg(custom_install_dir=None):
     
     LOGICA TECNICA:
     1. Verifica se `ffmpeg.exe` esiste nel percorso configurato.
-    2. Se esiste, esegue `ffmpeg -version` e estrae il major version
-       (es. "7" da "ffmpeg version 7.0.2") per identificare versioni obsolete (< 7).
+    2. Se esiste, esegue `ffmpeg -version` e controlla se l'output contiene "2024" 
+       (metodo semplificato per identificare versioni obsolete).
     3. In caso di assenza o obsolescenza:
        - Scarica l'ultima release build win64-gpl-shared da GitHub.
        - Estrae il file ZIP in una cartella temporanea `temp_ffmpeg`.
@@ -103,15 +105,14 @@ def check_and_update_ffmpeg(custom_install_dir=None):
         is_old = False
         if exists:
             res = subprocess.run([local_ffmpeg_exe, '-version'], capture_output=True, text=True)
-            # Check semantico: estrae il major version dalla stringa "ffmpeg version X.Y.Z"
-            version_match = re.search(r'ffmpeg version (\d+)\.', res.stdout)
-            if not version_match or int(version_match.group(1)) < 7:
+            version_match = re.search(r'20\d{2}', res.stdout)
+            if not version_match or int(version_match.group()) < 2024:
                 is_old = True
 
         if not exists or is_old:
             url = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip'
-            # Scarichiamo in una sottocartella temporanea all'interno della dir di installazione o app_root
-            temp_folder = os.path.join(install_dir, 'temp_ffmpeg')
+            # Scarichiamo in una sottocartella all'interno della dir di installazione
+            temp_folder = os.path.join(install_dir, '_temp_download')
             os.makedirs(temp_folder, exist_ok=True)
             filename = os.path.join(temp_folder, 'ffmpeg.zip')
             urllib.request.urlretrieve(url, filename)
@@ -136,3 +137,28 @@ FFMPEG_BIN = get_ffmpeg_path()
 # Impostazioni Tema Interfaccia Grafica (GUI)
 ctk.set_appearance_mode("Dark") 
 ctk.set_default_color_theme("blue")
+
+# ==============================================================================
+# CONFIGURAZIONE PERFORMANCE E CACHING
+# ==============================================================================
+
+# Directory per caching persistente (traduzioni e TTS)
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.cache')
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+# Dimensione massima cache in MB (default 500MB)
+MAX_CACHE_SIZE_MB = 500
+
+# Numero max worker per processing parallelo (default: CPU * 2, max 16)
+MAX_WORKERS = min(os.cpu_count() or 4 * 2, 16)
+
+# Timeout per chiamate API (secondi)
+API_TIMEOUT = 30
+API_TIMEOUT_TTS = 60
+
+# Retry FFmpeg configurabile
+FFMPEG_MAX_RETRIES = 3
+FFMPEG_RETRY_DELAY = 2
+
+# Abilita caching persistente su disco
+PERSISTENT_CACHE_ENABLED = True
