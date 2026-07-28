@@ -34,11 +34,13 @@ Implementa le funzionalità suggerite in `ai-sugerimenti.md` incluse: Embed SRT,
   - Rilevamento automatico livello: ❌=ERROR, ⚠️=WARN
 
 ### Performance
+
 - **Cache persistente su disco** per traduzioni e TTS
 - **Worker paralleli aumentati** a `min(cpu*2, 16)`
 - **Doppio livello cache**: memoria + disco
 
 ### Robustezza
+
 - **Timeout API configurabile** (`logic.py:158`, `config.py:156-157`)
   - Wrapper con `ThreadPoolExecutor` + timeout: 30s traduzione, 60s TTS
   - Exponential backoff: 2s, 4s, 8s...
@@ -51,6 +53,7 @@ Implementa le funzionalità suggerite in `ai-sugerimenti.md` incluse: Embed SRT,
 - **Gestione timestamp** con virgola o punto come separatore
 
 ### UX/UI
+
 - Progress bar multi-stage (6 fasi)
 - Drag-and-drop file support
 - Selezione gender voce per ogni lingua
@@ -58,7 +61,7 @@ Implementa le funzionalità suggerite in `ai-sugerimenti.md` incluse: Embed SRT,
 ### Moduli Principali
 
 | File | Descrizione |
-|------|-------------|
+| ------ | ------------- |
 | `main.py` | Entry point dell'applicazione |
 | `gui.py` | Interfaccia grafica CustomTkinter (850x950 px) |
 | `logic.py` | Core engine: SRT→Traduzione→TTS→Mixaggio audio |
