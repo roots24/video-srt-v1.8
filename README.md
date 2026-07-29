@@ -108,7 +108,7 @@ Per creare un eseguibile standalone:
 
 ```bash
 pip install pyinstaller
-pyinstaller build_app.spec
+python -m PyInstaller build_app.spec
 ```
 
 Il file sarà in `dist/UltimateVideoTranslatorAI.exe` (`console=True` — finestra terminale visibile per i log).
