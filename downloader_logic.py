@@ -1,8 +1,6 @@
 import yt_dlp
 import os
 import re
-import threading
-from tkinter import messagebox
 import config
 
 def is_valid_url(url):
@@ -34,10 +32,9 @@ def run_download_process(url, job_row, category, fmt_choice, save_path, browser_
         # Utilizziamo il percorso FFmpeg unificato da config.py
         ffmpeg_path = config.get_ffmpeg_path()
 
-        if not os.path.exists(save_path): 
-            os.makedirs(save_path)
-            
-        outtmpl = os.path.join(save_path, '%(playlist_title)s/%(playlist_index)s - %(title)s.%(ext)s') if 'playlist' in url else os.path.join(save_path, '%(title)s.%(ext)s')
+        # exist_ok: la cartella (spesso il CWD predefinito) esiste già —
+        # senza questa flag os.makedirs solleva FileExistsError e il download fallisce
+        os.makedirs(save_path, exist_ok=True)
 
         def progress_hook(d):
             """
@@ -59,7 +56,6 @@ def run_download_process(url, job_row, category, fmt_choice, save_path, browser_
             'cookies_from_browser': browser_choice, 
             'retries': 10,
             'ffmpeg_location': ffmpeg_path, 
-            'outtmpl': outtmpl,
             'progress_hooks': [progress_hook],
             'format': conf['fmt']
         }
@@ -70,8 +66,10 @@ def run_download_process(url, job_row, category, fmt_choice, save_path, browser_
         current_preset = preset_var.get() if hasattr(preset_var, 'get') else "medium"
         
         if conf.get("preset_support", False):
-            args = conf.get('args', []) if conf.get('args') else []
-            args.extend(['-preset', current_preset]) 
+            # Copia la lista: senza list() l'extend muterebbe gli args condivisi
+            # tra profili identici (Android/iOS HEVC), accumulando preset duplicati
+            args = list(conf.get('args') or [])
+            args.extend(['-preset', current_preset])
             ydl_opts['postprocessor_args'] = args
         elif conf.get('args'):
             ydl_opts['postprocessor_args'] = conf['args']
@@ -80,10 +78,18 @@ def run_download_process(url, job_row, category, fmt_choice, save_path, browser_
             ydl_opts['postprocessors'] = [conf['post']]
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # Estrazione unica dei metadati: il tipo (video/playlist) determina il template di output
             info = ydl.extract_info(url, download=False)
+            is_playlist = info.get('_type') == 'playlist'
+            outtmpl = (os.path.join(save_path, '%(playlist_title)s/%(playlist_index)s - %(title)s.%(ext)s')
+                       if is_playlist else os.path.join(save_path, '%(title)s.%(ext)s'))
+            # In yt-dlp moderno outtmpl deve essere un dict {'default': ...}, non una stringa
+            ydl.params['outtmpl'] = {'default': outtmpl}
             # Aggiornamento nome file tramite callback della riga
-            job_row.after(0, lambda: setattr(job_row.lbl_name, 'text', info.get('title', 'Video')[:40] + "..."))
-            ydl.download([url])
+            title = (info.get('title') or 'Video')[:40] + "..."
+            job_row.after(0, lambda t=title: setattr(job_row.lbl_name, 'text', t))
+            # Download senza seconda estrazione dei metadati
+            ydl.process_ie_result(info, download=True)
 
         job_row.set_final_status("✅ Completato", "green")
     except Exception as e:

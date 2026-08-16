@@ -7,6 +7,9 @@ import config
 from downloader_config import FORMAT_CONFIG
 from downloader_logic import is_valid_url, run_download_process
 
+# Titolo unico del downloader (finestra + header)
+DOWNLOADER_TITLE = "ꑭ 🚀 MULTI-VIDEO DOWNLOADER ULTRA PRO v1.9.1 By Banderivez ꑭ"
+
 class DownloadJobRow(ctk.CTkFrame):
     """
     Componente UI per la rappresentazione di un singolo job di download.
@@ -37,7 +40,8 @@ class DownloadJobRow(ctk.CTkFrame):
     def start_merge_animation(self):
         self.is_merging = True
         self.after(0, lambda: self.lbl_status.configure(text="⚙️ Merging...", text_color="#3498db"))
-        self._animate_pulse()
+        # L'animazione parte dal thread del downloader ma viene eseguita sul main thread
+        self.after(0, self._animate_pulse)
 
     def _animate_pulse(self):
         if not self.is_merging: return
@@ -46,12 +50,15 @@ class DownloadJobRow(ctk.CTkFrame):
         self.progress_bar.set(self.pulse_val)
         self.after(50, self._animate_pulse)
 
-    def stop_merge_animation(self):
+    def stop_merge_animation(self, mark_complete=True):
         self.is_merging = False
-        self.after(0, lambda: self.progress_bar.set(1.0))
+        if mark_complete:
+            self.after(0, lambda: self.progress_bar.set(1.0))
 
     def set_final_status(self, text, color="green"):
-        self.stop_merge_animation()
+        # La barra arriva al 100% SOLO in caso di successo: su errore l'animazione
+        # si ferma ma la percentuale non deve mostrare un completamento fittizio.
+        self.stop_merge_animation(mark_complete=(color == "green"))
         self.after(0, lambda: self.lbl_status.configure(text=text, text_color=color))
 
 class YoutubeDownloaderGUI(ctk.CTkToplevel):
@@ -66,11 +73,10 @@ class YoutubeDownloaderGUI(ctk.CTkToplevel):
     """
     def __init__(self):
         super().__init__()
-        self.title("ꑭ 🚀 MULTI-VIDEO DOWNLOADER ULTRA PRO v1.9.1 By Banderivez ꑭ")
+        self.title(DOWNLOADER_TITLE)
         # Dimensione ottimizzata per la maggior parte degli schermi
         self.geometry("750x900") 
-        ctk.set_appearance_mode("dark") 
-        ctk.set_default_color_theme("blue")
+        # (il tema dark/blue è già impostato da config.py all'import)
 
         self.browser_var = ctk.StringVar(value="chrome")
         self.selected_category = ctk.StringVar(value="Risoluzione")
@@ -88,7 +94,7 @@ class YoutubeDownloaderGUI(ctk.CTkToplevel):
         # --- HEADER (Più compatto) ---
         self.header_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
         self.header_frame.pack(pady=(10, 15), fill="x")
-        ctk.CTkLabel(self.header_frame, text="ꑭ 🚀 MULTI-VIDEO DOWNLOADER\nULTRA PRO v1.9.1 By Banderivez ꑭ", font=("Roboto", 24, "bold"), justify="center").pack()
+        ctk.CTkLabel(self.header_frame, text=DOWNLOADER_TITLE.replace("DOWNLOADER ", "DOWNLOADER\n", 1), font=("Roboto", 24, "bold"), justify="center").pack()
 
         # --- PANEL IMPOSTAZIONI (Grid) ---
         self.settings_panel = ctk.CTkFrame(self.main_container)
@@ -201,19 +207,26 @@ class YoutubeDownloaderGUI(ctk.CTkToplevel):
         folder = filedialog.askdirectory()
         if folder: self.entry_path.delete(0, "end"); self.entry_path.insert(0, folder)
 
+    def _run_ffmpeg_check(self, notify_on_success=True, button=None):
+        """Esegue config.check_and_update_ffmpeg() in background (mai bloccare la UI)
+        e notifica l'esito. `button` (se presente) viene riabilitato a fine operazione."""
+        def worker():
+            success, message = config.check_and_update_ffmpeg()
+            if success and notify_on_success:
+                self.after(0, lambda: messagebox.showinfo("Successo", message))
+            elif not success and "già aggiornato" not in message:
+                self.after(0, lambda: messagebox.showerror("Errore", message))
+            if button is not None:
+                self.after(0, lambda: button.configure(state="normal", text="Update FFmpeg Engine"))
+        threading.Thread(target=worker, daemon=True).start()
+
     def check_ffmpeg_on_startup(self):
-        """Verifica l'aggiornamento di FFmpeg all'avvio senza mostrare alert se già aggiornato."""
-        success, message = config.check_and_update_ffmpeg()
-        if success:
-            messagebox.showinfo("FFmpeg", message)
-        elif "già aggiornato" not in message:
-            messagebox.showerror("Errore", message)
+        """Verifica l'aggiornamento di FFmpeg all'avvio: nessun alert se già aggiornato."""
+        self._run_ffmpeg_check(notify_on_success=True)
 
     def check_and_update_ffmpeg(self):
-        """Wrapper per il pulsante della GUI che richiama la logica unificata."""
-        # Riutilizza la stessa logica ma mostra sempre il risultato (anche se già aggiornato)
-        success, message = config.check_and_update_ffmpeg()
-        msg_type = "Successo" if success else "Info"
-        messagebox.showinfo(msg_type, message)
+        """Pulsante "Update FFmpeg Engine": check in background + riabilitazione pulsante."""
+        self.btn_update_ffmpeg.configure(state="disabled", text="⏳ Aggiornamento...")
+        self._run_ffmpeg_check(notify_on_success=True, button=self.btn_update_ffmpeg)
 
 

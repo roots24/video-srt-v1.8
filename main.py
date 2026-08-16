@@ -1,5 +1,6 @@
 """
-Punto di ingresso principale dell'applicazione Ultimate Video Translator AI PRO v1.8.
+Punto di ingresso principale dell'applicazione Ultimate Video Translator AI PRO
+(versione corrente: config.APP_VERSION, aggiornabile con `python bump_version.py`).
 
 ARCHITETTURA TECNICA:
 L'applicazione segue un pattern a separazione tra Interfaccia Utente (GUI) e Logica di Business (Backend).

@@ -5,3 +5,7 @@ deep-translator>=1.11.4
 yt-dlp>=2023.0.0
 langdetect>=1.0.9
 audioop-lts>=0.2.0  # Required for Python 3.13+ compatibility with pydub
+# Opzionale: drag-and-drop nativo dei file nella GUI (senza, l'app funziona comunque)
+# tkinterdnd2>=0.4.2
+# Solo sviluppo: unit test (python -m pytest tests/)
+# pytest>=7.0

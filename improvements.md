@@ -1,6 +1,33 @@
-# Suggerimenti di Miglioramento — Ultimate Video Translator AI PRO v1.8
+# Suggerimenti di Miglioramento — Ultimate Video Translator AI PRO v1.8.1
 
-## ✅ Completati
+## ✅ Completati (v1.8.1 — Manutenzione)
+
+### Refactoring
+- ✅ **Retry unificato** — `logic.py:230` `_retry_with_backoff()` (backoff 2s/4s/8s, nessuno sleep dopo l'ultimo tentativo)
+- ✅ **Pipeline unificata** — `logic.py:834` `VideoTranslatorLogic.process()` usata da GUI singola e batch
+- ✅ **Parsing SRT centralizzato** — `logic.py:436` `extract_srt_text_sample()` (niente parser duplicato in gui.py)
+- ✅ **Pattern `NamedTemporaryFile`** → helper `_temp_file()` (5→1 occorrenze)
+- ✅ **Pattern `CREATE_NO_WINDOW`** → costante `NO_WINDOW` (4→1 occorrenze)
+- ✅ **Titolo downloader unificato** — costante `DOWNLOADER_TITLE` (`video_downloader_pro.py`)
+- ✅ **Import morti rimossi** — `threading`/`messagebox` in downloader_logic, `tempfile`/`shutil` in gui.py, `shlex` (sostituito da `tk.splitlist`)
+- ✅ **Metodo morto rimosso** — `BatchProcessor.remove_from_queue()`
+
+### Bug fix
+- ✅ **Warning pydub all'avvio** — PATH prima dell'import + sync `AudioSegment.converter`/`ffprobe`
+- ✅ **Timeout TTS** — usa `API_TIMEOUT_TTS` (60s) non il default 30s
+- ✅ **Barra downloader** — non più 100% su errore
+- ✅ **Timestamp SRT 4 cifre** millis e `-->` senza spazi
+- ✅ **Cache TTS memoria limitata** — `MAX_TTS_MEMORY_ENTRIES=200`
+- ✅ **Anti-drift** — taglio audio oltre l'inizio della frase successiva
+- ✅ **`embed_srt` in modalità audio** — checkbox disabilitata automaticamente
+- ✅ **Update FFmpeg senza bloccare la UI** — background + timeout 120s
+- ✅ **Riepilogo batch reale** — `process_all()` ritorna `(successi, totali)`
+- ✅ **Timeout download FFmpeg** — `urlopen(timeout=120)` al posto di `urlretrieve`
+
+### Test
+- ✅ **Suite pytest** — `tests/` (41 test): parsing, tempo, cache, retry, stretch, anti-drift, process, batch
+
+## ✅ Completati (v1.8)
 
 ### Bug / Typo
 - ✅ Creato directory persistente `ffmpeg_persistent/`
@@ -30,44 +57,44 @@
 
 ### Nuove Features (da ai-sugerimenti.md)
 
-- ✅ **Embed SRT nel video finale** — `logic.py:517` `merge_audio_video_mixed()`
+- ✅ **Embed SRT nel video finale** — `logic.py:622` `merge_audio_video_mixed()`
   - Parametro `embed_srt=False` (default)
   - Crea file SRT temporaneo e lo passa a FFmpeg con `-c:s mov_text -map 2:s:0`
   - Attivabile via checkbox in `gui.py:138` `self.cb_embed_srt`
 
-- ✅ **Auto-detect lingua sorgente** — `logic.py:332` `detect_language()`
+- ✅ **Auto-detect lingua sorgente** — `logic.py:360` `detect_language()`
   - Utilizza `langdetect` (opzionale: `pip install langdetect`)
   - Pulsante 🔍 in `gui.py:99` accanto al menu lingua sorgente
   - Estrae un campione di testo dal file SRT e lo analizza
   - Fallback graceful senza crash se libreria non installata
 
-- ✅ **Batch mode** — `logic.py:544` classe `BatchProcessor`
+- ✅ **Batch mode** — `logic.py:716` classe `BatchProcessor`
   - Coda di file SRT con configurazione individuale
-  - UI in `gui.py:162-188`: textbox coda, pulsanti +Aggiungi / X Svuota / ▶ Avvia Batch
+  - UI in `gui.py:165-188`: textbox coda, pulsanti +Aggiungi / X Svuota / ▶ Avvia Batch
   - Elaborazione sequenziale con progresso globale
 
-- ✅ **Progress indicator mixaggio video** — `logic.py:540-541`
+- ✅ **Progress indicator mixaggio video** — `logic.py:678-698`
   - Sostituito `subprocess.run` con `subprocess.Popen` in `merge_audio_video_mixed()`
   - Parsing progressivo di `time=` dallo stderr di FFmpeg
   - Aggiornamento barra da 90% a 100%
 
-- ✅ **Log filter per livello** — `gui.py:218-230`
+- ✅ **Log filter per livello** — `gui.py:219-230`
   - `CTkSegmentedButton` con valori: All / Info / Warn / Error
   - Storico cronologico (`self._log_history`) per refiltering
   - Rilevamento automatico livello: ❌=ERROR, ⚠️=WARN, altri=INFO
 
 ### Robustness (da ai-sugerimenti.md)
 
-- ✅ **Timeout API calls** — `logic.py:158` `execute_with_retry()`
+- ✅ **Timeout API calls** — `logic.py:172` `execute_with_retry()`
   - Wrapper con `ThreadPoolExecutor(max_workers=1)` + `future.result(timeout=...)`
-  - Timeout predefiniti in `config.py:156-157`: `API_TIMEOUT=30`, `API_TIMEOUT_TTS=60`
+  - Timeout predefiniti in `config.py:165-166`: `API_TIMEOUT=30`, `API_TIMEOUT_TTS=60`
   - Retry con exponential backoff: 2s, 4s, 8s...
 
-- ✅ **Retry FFmpeg configurabile** — `logic.py:184` `ffmpeg_execute_with_retry()`
-  - Parametri `max_retries=None` e `initial_delay=None` → default da `config.py:159-160`
+- ✅ **Retry FFmpeg configurabile** — `logic.py:205` `ffmpeg_execute_with_retry()`
+  - Parametri `max_retries=None` e `initial_delay=None` → default da `config.py:169-170`
   - Costanti: `FFMPEG_MAX_RETRIES=3`, `FFMPEG_RETRY_DELAY=2`
 
-- ✅ **Controllo spazio disco** — `logic.py:203` `check_disk_space()`
+- ✅ **Controllo spazio disco** — `logic.py:224` `check_disk_space()`
   - Usa `shutil.disk_usage()` per calcolare spazio disponibile
   - Chiamato in `generate_synced_audio()` prima dell'elaborazione
   - Stima spazio richiesto: `srt_size * 10 + n_segmenti * 0.5 + 200` MB
@@ -84,6 +111,10 @@
 - ✅ **FFmpeg encoding** — Aggiunto `encoding='utf-8'` e `errors='replace'` in `merge_audio_video_mixed()` per evitare errore `'charmap' codec can't decode byte` su Windows
 
 ## Da Implementare
+
+- **Export multi-language** (ai-sugerimenti #7): generare versioni in più lingue in una passata
+- **Previews before/after** (ai-sugerimenti #8): anteprima audio originale vs tradotto
+- **Playlist/downloader**: profili H.264 su YouTube ricadono su `best[ext=mp4]` (spesso bassa risoluzione)
 
 ## Setup
 

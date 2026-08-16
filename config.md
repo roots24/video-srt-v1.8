@@ -55,7 +55,7 @@ L'applicazione risolve il percorso di FFmpeg seguendo una gerarchia di priorità
 
 1. **Configurazione Utente**: Percorso salvato in `ffmpeg_settings.txt`.
 2. **Ambiente Sviluppo**: Cartella `/bin/` locale nel progetto.
-3. **Bundle PyInstaller**: Directory temporanea `_MEIPASS`. Il sistema verifica sia la root del bundle che la sottocartella `ffempeg/` per garantire il funzionamento dell'eseguibile standalone.
+3. **Bundle PyInstaller**: Directory temporanea `_MEIPASS`. Il sistema verifica sia la root del bundle che la sottocartella `ffmpeg/` per garantire il funzionamento dell'eseguibile standalone.
 4. **Sistema**: Comando globale nel PATH di sistema.
 
 ### Auto-Update Engine
@@ -66,9 +66,9 @@ Il sistema verifica autonomamente la versione di FFmpeg. Se assente o obsoleta, 
 
 L'applicazione è configurata per essere compilata in un singolo file `.exe` tramite **PyInstaller**.
 
-- **Configurazione Spec**: Viene utilizzato un file `build_app.spec` che istruisce PyInstaller a includere l'intera cartella `ffempeg/` all'interno del bundle.
+- **Configurazione Spec**: Viene utilizzato un file `build_app.spec` che istruisce PyInstaller a includere la cartella `ffmpeg_persistent/*` e il file `ffmpeg_settings.txt` all'interno del bundle.
 - **Dependency Mapping**: I moduli critici come `edge-tts`, `yt-dlp` e `customtkinter` sono mappati come `hiddenimports` per evitare errori di runtime nel bundle compilato.
-- **UX Standalone**: L'opzione `--noconsole` è attiva per nascondere il terminale all'avvio, fornendo un'esperienza utente puramente basata su interfaccia grafica.
+- **UX Standalone**: Il file `build_app.spec` usa `console=True` (finestra terminale visibile per i log). Per nasconderla, impostare `console=False`.
 
 ---
 
@@ -77,7 +77,8 @@ L'applicazione è configurata per essere compilata in un singolo file `.exe` tra
 ### Librerie Python
 
 ```bash
-pip install customtkinter edge-tts pydub deep-translator yt-dlp
+pip install -r requirements.txt
+# equivalenza: customtkinter edge-tts pydub deep-translator yt-dlp langdetect audioop-lts
 ```
 
 ### Esecuzione
