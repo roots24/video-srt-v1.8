@@ -1,6 +1,5 @@
 # Ultimate Video Translator AI PRO v1.8.2
 
-
 Applicazione Python avanzata per la traduzione neurale di video tramite file SRT, con download video integrato e caching persistente.
 
 Implementa le funzionalità suggerite in `ai-sugerimenti.md` incluse: Embed SRT, auto-detect lingua, timeout API, batch mode, log filter, controllo spazio disco, progress mixing e unit test.

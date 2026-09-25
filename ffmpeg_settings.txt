@@ -1,1 +1,1 @@
-C:/Users/X299/Documents/GitHub/video-srt-v1.8/ffmpeg_persistent
+C:/Users/X299/Documents/GitHub/video-srt-v1.8/dist/UltimateVideoTranslatorAI/ffmpeg_persistent
